@@ -69,10 +69,10 @@ export default function SourceCodeAnalyzer() {
     cancelPollers.current[id] = cancel;
   };
 
-  const createProject = async (url) => {
+  const createProject = async (url, token = "") => {
     setNewOpen(false);
     try {
-      const project = await startIngest(url);
+      const project = await startIngest(url, token);
       setProjects((prev) => [project, ...prev]);
       setSelectedId(project.id);
       watchIngest(project.id);

@@ -43,6 +43,10 @@ export default function ProjectCard({ project, active, onSelect, onDelete }) {
           <span className="meta-sep">·</span>
           <span>{project.indexedAt}</span>
         </div>
+      ) : project.status === "error" ? (
+        <div className="project-card-error">
+          <span>⚠ {project.error || "Indexing failed. Please try again."}</span>
+        </div>
       ) : (
         <PipelineRail stageIndex={project.stageIndex} size="mini" />
       )}

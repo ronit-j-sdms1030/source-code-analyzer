@@ -26,12 +26,12 @@ def _repo_name_from_url(url: str) -> str:
     return clean.split("/")[-1] or "repository"
 
 
-def start_ingest(url: str) -> dict:
+def start_ingest(url: str, token: str = "") -> dict:
     project_id = f"p{uuid.uuid4().hex[:10]}"
     project = {
         "id": project_id,
         "name": _repo_name_from_url(url),
-        "url": url,
+        "url": url,  # store the clean URL, never the token
         "status": "indexing",
         "stageIndex": 0,
         "files": 0,
@@ -42,7 +42,7 @@ def start_ingest(url: str) -> dict:
     with _lock:
         _projects[project_id] = project
 
-    thread = threading.Thread(target=_run_pipeline, args=(project_id, url), daemon=True)
+    thread = threading.Thread(target=_run_pipeline, args=(project_id, url, token), daemon=True)
     thread.start()
     return project
 
@@ -68,18 +68,52 @@ def _set_stage(project_id: str, stage_index: int):
             _projects[project_id]["stageIndex"] = stage_index
 
 
-def _run_pipeline(project_id: str, url: str):
+def _generate_repo_tree(repo_path: str) -> str:
+    """Generates a text representation of the file tree for LLM context."""
+    import os
+
+    tree_lines = []
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if d not in config.SKIP_DIRS]
+        dirs.sort()
+        files.sort()
+        
+        rel_path = os.path.relpath(root, repo_path)
+        if rel_path == ".":
+            rel_path = ""
+        else:
+            # Unix-style paths for the tree
+            rel_path = rel_path.replace(os.sep, "/")
+            tree_lines.append(f"{rel_path}/")
+            
+        for f in files:
+            if rel_path:
+                tree_lines.append(f"{rel_path}/{f}")
+            else:
+                tree_lines.append(f)
+                
+        if len(tree_lines) > 5000:
+            tree_lines.append("... (tree truncated, too many files)")
+            break
+            
+    return "\n".join(tree_lines)
+
+
+def _run_pipeline(project_id: str, url: str, token: str = ""):
     try:
         # [1] Repo cloner — shallow clone (git clone --depth=1)
-        repo_path = _clone_repo(project_id, url)
+        repo_path = _clone_repo(project_id, url, token)
         _set_stage(project_id, 1)
 
-        # [2] File filter — collect .py files, skip noise dirs
-        py_files = _filter_python_files(repo_path)
+        # [2] File filter — collect all supported source files, skip noise dirs
+        py_files = _filter_source_files(repo_path)
         _set_stage(project_id, 2)
 
+        # Generate file tree before the repo is deleted, so LLM can understand repo structure
+        file_tree = _generate_repo_tree(repo_path)
+
         # [3] Code-aware splitter — chunk by function/class
-        chunks = _split_files(py_files)
+        chunks = _split_files(py_files, repo_path)
         _set_stage(project_id, 3)
 
         # [4] Embedder — chunk -> vector
@@ -91,6 +125,7 @@ def _run_pipeline(project_id: str, url: str):
         _set_stage(project_id, 5)
 
         # Post-indexing cleanup: raw repo files aren't needed once vectors persist.
+        import shutil
         shutil.rmtree(repo_path, ignore_errors=True)
 
         result = {
@@ -98,11 +133,12 @@ def _run_pipeline(project_id: str, url: str):
             "stageIndex": len(STAGES),
             "files": len(py_files),
             "chunks": len(chunks),
+            "file_tree": file_tree,
             "indexedAt": "just now",
             "messages": [
                 {
                     "role": "assistant",
-                    "text": f"Repo indexed. {len(py_files)} Python files split into "
+                    "text": f"Repo indexed. {len(py_files)} source files split into "
                     f"{len(chunks):,} chunks. Ask me anything about this codebase.",
                     "sources": [],
                 }
@@ -118,48 +154,145 @@ def _run_pipeline(project_id: str, url: str):
                 _projects[project_id]["error"] = str(exc)
 
 
-def _clone_repo(project_id: str, url: str) -> str:
-    """Shallow-clones the repo via GitPython (--depth=1) into data/repos/<id>."""
+def _clone_repo(project_id: str, url: str, token: str = "") -> str:
+    """Shallow-clones the repo via GitPython (--depth=1) into data/repos/<id>.
+
+    If a token is supplied it is injected into the HTTPS URL so private
+    repos can be cloned. GitHub PATs use 'x-access-token:<token>@host'.
+    The token is never stored — it exists only for the duration of this call.
+    """
     from git import Repo  # GitPython
+    from urllib.parse import urlparse, urlunparse, quote
+    import os
+
+    clone_url = url
+    if token:
+        parsed = urlparse(url)
+        encoded_token = quote(token, safe="")
+        # GitHub documents x-access-token as the username for PAT auth
+        authed = parsed._replace(netloc=f"x-access-token:{encoded_token}@{parsed.hostname}")
+        clone_url = urlunparse(authed)
 
     dest = f"{config.REPOS_DIR}/{project_id}"
-    Repo.clone_from(url, dest, depth=1)
+    os.makedirs(dest, exist_ok=True)
+    try:
+        Repo.clone_from(clone_url, dest, depth=1)
+    except Exception as exc:
+        import shutil
+        shutil.rmtree(dest, ignore_errors=True)
+        stderr = str(exc).lower()
+        print(f"[clone error] {exc}", flush=True)
+        # Produce a friendly message based on the git error and whether a token was provided
+        if "repository not found" in stderr or "not found" in stderr:
+            if not token:
+                raise RuntimeError(
+                    "This appears to be a private repository. "
+                    "Please click '🔒 Private repo? Add access token' and enter "
+                    "your GitHub Personal Access Token (PAT) to continue."
+                )
+            else:
+                raise RuntimeError(
+                    "Repository not found or access denied. "
+                    "Make sure your PAT belongs to an account that has access to this repo "
+                    "and has the 'repo' scope (classic) or 'Contents: Read' permission (fine-grained)."
+                )
+        elif "authentication failed" in stderr or "403" in stderr or "401" in stderr:
+            raise RuntimeError(
+                "Authentication failed. Your access token is invalid or has expired. "
+                "Please generate a new PAT on GitHub and try again."
+            )
+        elif "could not resolve host" in stderr or "unable to connect" in stderr:
+            raise RuntimeError(
+                "Network error: could not reach GitHub. Please check your internet connection."
+            )
+        else:
+            raise RuntimeError(f"Clone failed: {exc}")
     return dest
 
 
-def _filter_python_files(repo_path: str) -> list:
-    """Walks the cloned tree, collects .py files, skips noise directories."""
+# Supported file extensions mapped to their LangChain Language enum value.
+# Extensions not listed here are skipped during ingestion.
+SUPPORTED_EXTENSIONS = {
+    ".py": "PYTHON",
+    ".js": "JS",
+    ".jsx": "JS",
+    ".ts": "TS",
+    ".tsx": "TS",
+    ".java": "JAVA",
+    ".go": "GO",
+    ".c": "C",
+    ".h": "C",
+    ".cpp": "CPP",
+    ".cc": "CPP",
+    ".cs": "CSHARP",
+    ".rs": "RUST",
+    ".rb": "RUBY",
+    ".php": "PHP",
+    ".swift": "SWIFT",
+    ".kt": "KOTLIN",
+    ".scala": "SCALA",
+    ".md": "MARKDOWN",
+}
+
+
+def _filter_source_files(repo_path: str) -> list:
+    """Walks the cloned tree, collects all supported source files, skips noise dirs."""
     import os
 
     files = []
     for root, dirs, filenames in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in config.SKIP_DIRS]
         for name in filenames:
-            if name.endswith(".py"):
+            ext = os.path.splitext(name)[1].lower()
+            if ext in SUPPORTED_EXTENSIONS:
                 files.append(os.path.join(root, name))
                 if len(files) >= config.MAX_FILES_PER_REPO:
                     return files
     return files
 
 
-def _split_files(py_files: list) -> list:
-    """Breaks each file into chunks aligned to functions/classes.
+def _split_files(source_files: list, repo_path: str) -> list:
+    """Breaks each file into chunks using a language-aware splitter.
 
-    Uses LangChain's RecursiveCharacterTextSplitter.from_language(Language.PYTHON)
-    so chunks preserve logical context instead of splitting on arbitrary line counts.
+    Uses LangChain's RecursiveCharacterTextSplitter.from_language() with the
+    correct Language enum for each file extension, so chunks preserve logical
+    context (functions, classes, blocks) instead of splitting on arbitrary line
+    counts. Falls back to generic splitting for unrecognized extensions.
     """
-    from langchain.text_splitter import RecursiveCharacterTextSplitter, Language
+    import os
+    from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 
-    splitter = RecursiveCharacterTextSplitter.from_language(
-        language=Language.PYTHON, chunk_size=800, chunk_overlap=100
-    )
+    _splitter_cache = {}
+
+    def _get_splitter(ext: str):
+        lang_name = SUPPORTED_EXTENSIONS.get(ext)
+        if lang_name not in _splitter_cache:
+            try:
+                lang = Language[lang_name]
+                splitter = RecursiveCharacterTextSplitter.from_language(
+                    language=lang, chunk_size=800, chunk_overlap=100
+                )
+            except (KeyError, Exception):
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=800, chunk_overlap=100
+                )
+            _splitter_cache[lang_name] = splitter
+        return _splitter_cache[lang_name]
+
     chunks = []
-    for i, path in enumerate(py_files):
+    for path in source_files:
+        ext = os.path.splitext(path)[1].lower()
+        splitter = _get_splitter(ext)
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 text = f.read()
         except OSError:
             continue
+            
+        # Use clean relative paths (e.g. 'app/bot.py') instead of ugly absolute ones
+        # so the UI and the LLM see a clean, standard file structure
+        rel_path = os.path.relpath(path, repo_path).replace(os.sep, "/")
+        
         for j, piece in enumerate(splitter.split_text(text)):
-            chunks.append({"text": piece, "file_path": path, "chunk_index": j})
+            chunks.append({"text": piece, "file_path": rel_path, "chunk_index": j})
     return chunks

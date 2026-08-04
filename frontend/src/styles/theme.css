@@ -27,6 +27,8 @@
 }
 
 * { box-sizing: border-box; }
+body { margin: 0; padding: 0; }
+
 
 .app {
   min-height: 100vh;
@@ -144,6 +146,7 @@
 .status-chip svg { color: var(--dot); }
 .project-card-url { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--text-tertiary); }
 .project-card-meta { font-size: 11px; color: var(--text-secondary); font-family: 'Inter', sans-serif; }
+.project-card-error { font-size: 11px; color: #ff6b6b; background: rgba(255,107,107,0.08); border: 1px solid rgba(255,107,107,0.2); border-radius: 6px; padding: 6px 8px; margin-top: 4px; line-height: 1.5; word-break: break-word; }
 .meta-sep { color: var(--text-tertiary); margin: 0 5px; }
 
 .delete-trigger {

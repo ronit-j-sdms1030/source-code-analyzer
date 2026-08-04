@@ -6,7 +6,7 @@
 //   GET  /projects                                        -> [ project, ... ]
 //   DELETE /projects/:id                                  -> { ok: true }
 
-export const MODEL_NAME = "qwen2.5-coder:3b";
+export const MODEL_NAME = "llama-3.1-8b (OpenRouter)";
 
 const BASE_URL = ""; // same-origin; Flask serves the built frontend + API
 
@@ -27,10 +27,10 @@ export function listProjects() {
   return request("/projects");
 }
 
-export function startIngest(url) {
+export function startIngest(url, token = "") {
   return request("/ingest", {
     method: "POST",
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, token }),
   });
 }
 

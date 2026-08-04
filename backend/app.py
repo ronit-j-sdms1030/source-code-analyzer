@@ -30,9 +30,10 @@ def projects():
 def ingest():
     body = request.get_json(force=True)
     url = (body or {}).get("url", "").strip()
+    token = (body or {}).get("token", "").strip()
     if not url:
         return jsonify({"error": "url is required"}), 400
-    project = start_ingest(url)
+    project = start_ingest(url, token=token)
     return jsonify(project), 201
 
 
