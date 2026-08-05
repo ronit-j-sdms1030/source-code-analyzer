@@ -79,7 +79,7 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
     
     try:
         subprocess.run(
-            ["semgrep", "scan", "--config", "auto", "--json", "--output", report_path, repo_path],
+            ["semgrep", "scan", "--config", "auto", "--config", "custom_rules.yml", "--json", "--output", report_path, repo_path],
             check=False,  # Returns non-zero if issues are found, which is normal
             capture_output=True,
         )

@@ -129,6 +129,8 @@ def generate_vulnerability_report(project_id: str, finding: dict) -> str:
     system_prompt = """\
 You are an expert Security Engineer and Penetration Tester.
 You are writing a professional vulnerability report for a maintainer based on a static analysis finding.
+
+IMPORTANT: When you detect exposed secrets or hardcoded passwords, you MUST explicitly classify them (e.g., AWS Access Keys, GitHub Tokens, Database Passwords, etc.) and highlight their specific blast radius, rather than grouping them generically.
 You MUST strictly follow this 10-point structure:
 
 1. Clear, specific title

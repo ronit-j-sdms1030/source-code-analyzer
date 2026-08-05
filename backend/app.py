@@ -11,7 +11,7 @@ In production this also serves the built React frontend from ./static
 (see frontend/vite.config.js, which builds directly into backend/static).
 """
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, send_file
 
 from src import config
 from src.ingestion import start_ingest, get_status, delete_project
@@ -88,6 +88,30 @@ def generate_vuln_report(project_id):
 def remove_project(project_id):
     delete_project(project_id)
     return jsonify({"ok": True})
+
+
+@app.get("/projects/<project_id>/download/repo")
+def download_repo(project_id):
+    import shutil
+    import os
+    repo_path = os.path.join(config.REPORTS_DIR, "..", "repos", project_id)
+    if not os.path.exists(repo_path):
+        return jsonify({"error": "repo not found"}), 404
+    
+    zips_dir = os.path.join(config.DATA_DIR, "zips")
+    os.makedirs(zips_dir, exist_ok=True)
+    zip_path = os.path.join(zips_dir, project_id)
+    shutil.make_archive(zip_path, 'zip', repo_path)
+    return send_file(zip_path + ".zip", as_attachment=True, download_name=f"{project_id}_repo.zip")
+
+
+@app.get("/projects/<project_id>/download/report")
+def download_report(project_id):
+    import os
+    report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+    if not os.path.exists(report_path):
+        return jsonify({"error": "report not found"}), 404
+    return send_file(report_path, as_attachment=True, download_name=f"{project_id}_vulnerabilities.json")
 
 
 # Serve the built frontend (frontend/vite.config.js builds into ./static).

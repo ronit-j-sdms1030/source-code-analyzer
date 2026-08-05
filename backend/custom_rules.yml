@@ -1,0 +1,15 @@
+rules:
+  - id: hardcoded-password-in-code
+    patterns:
+      - pattern-either:
+          - pattern: $X = "..."
+          - pattern: $X = '...'
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i)(password|passwd|pwd|secret|token)
+    message: "Hardcoded password or secret found in code. Do not store secrets in source code."
+    languages:
+      - javascript
+      - typescript
+      - python
+    severity: HIGH

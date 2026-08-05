@@ -42,6 +42,7 @@ export default function SourceCodeAnalyzer() {
   const [reportProject, setReportProject] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
   const [theme, setTheme] = useState("dark");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const cancelPollers = useRef({});
 
   // Load existing projects from the backend on mount.
@@ -146,27 +147,39 @@ export default function SourceCodeAnalyzer() {
       </header>
 
       <div className="body">
-        <aside className="sidebar">
-          <button className="new-project-toggle" onClick={() => setNewOpen((v) => !v)}>
-            <Icon.Plus />
-            New project
-            <Icon.Chevron className={`chev ${newOpen ? "up" : ""}`} />
-          </button>
+        <aside className={`sidebar ${sidebarOpen ? "open" : "collapsed"}`}>
+          <div className="sidebar-header">
+            <button 
+              className="sidebar-toggle-btn" 
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              title={sidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+            >
+              <Icon.Chevron className={sidebarOpen ? "left" : "right"} />
+            </button>
+          </div>
 
-          <NewProjectPanel open={newOpen} onClose={() => setNewOpen(false)} onCreate={createProject} />
+          <div className="sidebar-content">
+            <button className="new-project-toggle" onClick={() => setNewOpen((v) => !v)}>
+              <Icon.Plus />
+              New project
+              <Icon.Chevron className={`chev ${newOpen ? "up" : ""}`} />
+            </button>
 
-          <div className="project-list">
-            <div className="project-list-label">Repositories</div>
-            {projects.map((p) => (
-              <ProjectCard 
-                key={p.id} 
-                project={p} 
-                active={p.id === selectedId} 
-                onSelect={setSelectedId} 
-                onDelete={deleteProjectHandler} 
-                onViewReport={setReportProject}
-              />
-            ))}
+            <NewProjectPanel open={newOpen} onClose={() => setNewOpen(false)} onCreate={createProject} />
+
+            <div className="project-list">
+              <div className="project-list-label">Repositories</div>
+              {projects.map((p) => (
+                <ProjectCard 
+                  key={p.id} 
+                  project={p} 
+                  active={p.id === selectedId} 
+                  onSelect={setSelectedId} 
+                  onDelete={deleteProjectHandler} 
+                  onViewReport={setReportProject}
+                />
+              ))}
+            </div>
           </div>
         </aside>
 

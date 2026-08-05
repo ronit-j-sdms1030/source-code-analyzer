@@ -78,13 +78,39 @@ body { margin: 0; padding: 0; }
 /* ---- body / layout ---- */
 .body { flex: 1; display: flex; min-height: 0; }
 .sidebar {
-  width: 300px; flex-shrink: 0;
+  flex-shrink: 0;
   border-right: 1px solid var(--border-hair);
   background: var(--bg-panel);
   display: flex; flex-direction: column;
-  padding: 16px 14px;
-  overflow-y: auto;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
 }
+.sidebar.open { width: 20%; min-width: 260px; max-width: 340px; }
+.sidebar.collapsed { width: 50px; }
+
+.sidebar-header {
+  padding: 12px;
+  display: flex; align-items: center; justify-content: flex-end;
+  height: 48px; box-sizing: border-box;
+}
+.sidebar.collapsed .sidebar-header { justify-content: center; padding: 12px 0; }
+
+.sidebar-toggle-btn {
+  background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
+  padding: 6px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  transition: 0.15s ease;
+}
+.sidebar-toggle-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.sidebar-toggle-btn svg { transition: transform 0.2s ease; }
+.sidebar-toggle-btn svg.left { transform: rotate(180deg); }
+.sidebar-toggle-btn svg.right { transform: rotate(0deg); }
+
+.sidebar-content {
+  padding: 0 14px 16px; flex: 1; overflow-y: auto;
+  opacity: 1; transition: opacity 0.2s ease;
+  display: flex; flex-direction: column; width: 100%; box-sizing: border-box;
+}
+.sidebar.collapsed .sidebar-content { opacity: 0; pointer-events: none; padding: 0; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* ---- new project ---- */
@@ -149,11 +175,12 @@ body { margin: 0; padding: 0; }
 .project-card-error { font-size: 11px; color: #ff6b6b; background: rgba(255,107,107,0.08); border: 1px solid rgba(255,107,107,0.2); border-radius: 6px; padding: 6px 8px; margin-top: 4px; line-height: 1.5; word-break: break-word; }
 .meta-sep { color: var(--text-tertiary); margin: 0 5px; }
 
-.delete-trigger {
+.action-btn {
   flex-shrink: 0; background: transparent; border: none; color: var(--text-tertiary);
   padding: 2px; margin-left: 4px; border-radius: 4px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
+.action-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.1); }
 .delete-trigger:hover { color: var(--status-error); background: rgba(240,85,63,0.12); }
 .delete-confirm {
   margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-hair);
