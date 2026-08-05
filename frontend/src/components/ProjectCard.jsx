@@ -28,42 +28,6 @@ export default function ProjectCard({ project, active, onSelect, onDelete, onVie
           <Icon.Dot />
           {statusMeta.label}
         </span>
-        {project.status === "ready" && (
-          <>
-            <button
-              className="action-btn"
-              title="Download Code Repository (.zip)"
-              onClick={(e) => {
-                e.stopPropagation();
-                window.open(`http://127.0.0.1:5000/projects/${project.id}/download/repo`);
-              }}
-            >
-              <Icon.Download />
-            </button>
-            {hasVulns && (
-              <button
-                className="action-btn"
-                title="Download Vulnerability Report (.json)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(`http://127.0.0.1:5000/projects/${project.id}/download/report`);
-                }}
-              >
-                <Icon.File />
-              </button>
-            )}
-          </>
-        )}
-        <button
-          className="action-btn delete-trigger"
-          title={`Delete ${project.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setConfirming(true);
-          }}
-        >
-          <Icon.Trash />
-        </button>
       </div>
       <div className="project-card-url">{project.url.replace("https://", "")}</div>
       {project.status === "ready" ? (
@@ -81,24 +45,6 @@ export default function ProjectCard({ project, active, onSelect, onDelete, onVie
       ) : (
         <PipelineRail stageIndex={project.stageIndex} size="mini" />
       )}
-      {confirming && (
-        <div className="delete-confirm" onClick={(e) => e.stopPropagation()}>
-          <span>Delete this repo?</span>
-          <div className="delete-confirm-actions">
-            <button
-              className="delete-confirm-cancel"
-              onClick={() => setConfirming(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className="delete-confirm-delete"
-              onClick={() => onDelete(project.id)}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
       )}
     </div>
   );

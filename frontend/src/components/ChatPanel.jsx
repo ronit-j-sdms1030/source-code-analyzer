@@ -35,7 +35,7 @@ export function ChatMessage({ msg }) {
   );
 }
 
-export default function ChatPanel({ project, onAsk, onViewReport }) {
+export default function ChatPanel({ project, onAsk, onViewReport, onDelete }) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef(null);
 
@@ -82,9 +82,34 @@ export default function ChatPanel({ project, onAsk, onViewReport }) {
             <span className="stat-num">{project.files}</span>
             <span className="stat-label">Files</span>
           </div>
-          <div className="stat">
-            <span className="stat-num online">●</span>
-            <span className="stat-label">{MODEL_NAME}</span>
+          <div className="stat" style={{ display: 'flex', gap: '4px', alignItems: 'center', marginLeft: '12px' }}>
+            <button
+              className="action-btn"
+              title="Download Code Repository (.zip)"
+              onClick={() => window.open(`http://127.0.0.1:5000/projects/${project.id}/download/repo`)}
+            >
+              <Icon.Download />
+            </button>
+            {hasVulns && (
+              <button
+                className="action-btn"
+                title="Download Vulnerability Report (.json)"
+                onClick={() => window.open(`http://127.0.0.1:5000/projects/${project.id}/download/report`)}
+              >
+                <Icon.File />
+              </button>
+            )}
+            <button
+              className="action-btn delete-trigger"
+              title={`Delete ${project.name}`}
+              onClick={() => {
+                if (window.confirm(`Are you sure you want to delete ${project.name}?`)) {
+                  onDelete && onDelete(project.id);
+                }
+              }}
+            >
+              <Icon.Trash />
+            </button>
           </div>
         </div>
       </div>
