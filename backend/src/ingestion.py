@@ -15,7 +15,7 @@ from . import config
 from .embeddings import embed_chunks
 from .vectorstore import write_chunks, delete_collection, upsert_project_meta, get_project_meta
 
-STAGES = ["clone", "filter", "split", "embed", "store"]
+STAGES = ["clone", "filter", "scan", "split", "embed", "store"]
 
 _projects = {}  # in-memory status cache; vectorstore.list_projects() is the source of truth for "ready" projects
 _lock = threading.Lock()
@@ -68,6 +68,40 @@ def _set_stage(project_id: str, stage_index: int):
             _projects[project_id]["stageIndex"] = stage_index
 
 
+def _run_semgrep(project_id: str, repo_path: str) -> dict:
+    """Runs Semgrep on the cloned repo, saves JSON report, returns severity counts."""
+    import subprocess
+    import json
+    import os
+    
+    os.makedirs(config.REPORTS_DIR, exist_ok=True)
+    report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+    
+    try:
+        subprocess.run(
+            ["semgrep", "scan", "--config", "auto", "--json", "--output", report_path, repo_path],
+            check=False,  # Returns non-zero if issues are found, which is normal
+            capture_output=True,
+        )
+        
+        counts = {"high": 0, "medium": 0, "low": 0}
+        if os.path.exists(report_path):
+            with open(report_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for finding in data.get("results", []):
+                    sev = finding.get("extra", {}).get("severity", "").lower()
+                    if sev == "error" or sev == "high":
+                        counts["high"] += 1
+                    elif sev == "warning" or sev == "medium":
+                        counts["medium"] += 1
+                    else:
+                        counts["low"] += 1
+        return counts
+    except Exception as e:
+        print(f"[semgrep error] {e}", flush=True)
+        return {"high": 0, "medium": 0, "low": 0}
+
+
 def _generate_repo_tree(repo_path: str) -> str:
     """Generates a text representation of the file tree for LLM context."""
     import os
@@ -112,17 +146,21 @@ def _run_pipeline(project_id: str, url: str, token: str = ""):
         # Generate file tree before the repo is deleted, so LLM can understand repo structure
         file_tree = _generate_repo_tree(repo_path)
 
-        # [3] Code-aware splitter — chunk by function/class
-        chunks = _split_files(py_files, repo_path)
+        # [3] Semgrep — Scan for vulnerabilities
+        vuln_counts = _run_semgrep(project_id, repo_path)
         _set_stage(project_id, 3)
 
-        # [4] Embedder — chunk -> vector
-        vectors = embed_chunks([c["text"] for c in chunks])
+        # [4] Code-aware splitter — chunk by function/class
+        chunks = _split_files(py_files, repo_path)
         _set_stage(project_id, 4)
 
-        # [5] Vector writer — persist to ChromaDB (per-repo collection)
-        write_chunks(project_id, chunks, vectors)
+        # [5] Embedder — chunk -> vector
+        vectors = embed_chunks([c["text"] for c in chunks])
         _set_stage(project_id, 5)
+
+        # [6] Vector writer — persist to ChromaDB (per-repo collection)
+        write_chunks(project_id, chunks, vectors)
+        _set_stage(project_id, 6)
 
         # Post-indexing cleanup: raw repo files aren't needed once vectors persist.
         import shutil
@@ -134,6 +172,7 @@ def _run_pipeline(project_id: str, url: str, token: str = ""):
             "files": len(py_files),
             "chunks": len(chunks),
             "file_tree": file_tree,
+            "vulnerabilities": vuln_counts,
             "indexedAt": "just now",
             "messages": [
                 {

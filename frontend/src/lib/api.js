@@ -42,6 +42,17 @@ export function deleteProject(id) {
   return request(`/projects/${id}`, { method: "DELETE" });
 }
 
+export function getVulnerabilities(id) {
+  return request(`/projects/${id}/vulnerabilities`);
+}
+
+export function generateVulnReport(id, finding) {
+  return request(`/projects/${id}/vulnerabilities/report`, {
+    method: "POST",
+    body: JSON.stringify({ finding }),
+  });
+}
+
 export function askQuestion(projectId, question) {
   return request("/chat", {
     method: "POST",

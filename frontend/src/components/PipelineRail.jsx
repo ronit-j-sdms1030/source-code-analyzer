@@ -3,6 +3,7 @@ import React from "react";
 export const STAGES = [
   { key: "clone", label: "Clone" },
   { key: "filter", label: "Filter" },
+  { key: "scan", label: "Scan" },
   { key: "split", label: "Split" },
   { key: "embed", label: "Embed" },
   { key: "store", label: "Store" },

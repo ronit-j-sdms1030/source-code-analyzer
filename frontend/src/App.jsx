@@ -4,6 +4,7 @@ import PipelineRail, { STAGES } from "./components/PipelineRail";
 import NewProjectPanel from "./components/NewProjectPanel";
 import ProjectCard from "./components/ProjectCard";
 import ChatPanel from "./components/ChatPanel";
+import VulnerabilityModal from "./components/VulnerabilityModal";
 import { listProjects, startIngest, deleteProject as apiDeleteProject, askQuestion as apiAskQuestion, pollIngestStatus } from "./lib/api";
 import starkLogo from "/stark.svg";
 
@@ -38,6 +39,7 @@ function EmptyState({ onOpenNew }) {
 export default function SourceCodeAnalyzer() {
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [reportProject, setReportProject] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
   const [theme, setTheme] = useState("dark");
   const cancelPollers = useRef({});
@@ -156,7 +158,14 @@ export default function SourceCodeAnalyzer() {
           <div className="project-list">
             <div className="project-list-label">Repositories</div>
             {projects.map((p) => (
-              <ProjectCard key={p.id} project={p} active={p.id === selectedId} onSelect={setSelectedId} onDelete={deleteProjectHandler} />
+              <ProjectCard 
+                key={p.id} 
+                project={p} 
+                active={p.id === selectedId} 
+                onSelect={setSelectedId} 
+                onDelete={deleteProjectHandler} 
+                onViewReport={setReportProject}
+              />
             ))}
           </div>
         </aside>
@@ -177,6 +186,14 @@ export default function SourceCodeAnalyzer() {
           {selected && selected.status === "ready" && <ChatPanel project={selected} onAsk={askQuestion} />}
         </main>
       </div>
+
+      {reportProject && (
+        <VulnerabilityModal 
+          projectId={reportProject.id} 
+          projectName={reportProject.name} 
+          onClose={() => setReportProject(null)} 
+        />
+      )}
     </div>
   );
 }

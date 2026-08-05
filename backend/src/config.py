@@ -10,6 +10,7 @@ DEBUG = os.environ.get("FLASK_DEBUG", "1") == "1"
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
 REPOS_DIR = os.path.join(DATA_DIR, "repos")
 CHROMA_DIR = os.path.join(DATA_DIR, "chroma")
+REPORTS_DIR = os.path.join(DATA_DIR, "reports")
 
 CLOUD_API_URL = os.environ.get("CLOUD_API_URL", "https://openrouter.ai/api/v1")
 CLOUD_API_KEY = os.environ.get("CLOUD_API_KEY", "")

@@ -2,13 +2,16 @@ import React, { useState } from "react";
 import Icon from "./icons";
 import PipelineRail from "./PipelineRail";
 
-export default function ProjectCard({ project, active, onSelect, onDelete }) {
+export default function ProjectCard({ project, active, onSelect, onDelete, onViewReport }) {
   const [confirming, setConfirming] = useState(false);
   const statusMeta = {
     ready: { label: "Ready", color: "var(--status-ready)" },
     indexing: { label: "Indexing", color: "var(--status-indexing)" },
     error: { label: "Failed", color: "var(--status-error)" },
   }[project.status];
+
+  const v = project.vulnerabilities;
+  const hasVulns = v && (v.high > 0 || v.medium > 0 || v.low > 0);
 
   return (
     <div
@@ -38,11 +41,28 @@ export default function ProjectCard({ project, active, onSelect, onDelete }) {
       </div>
       <div className="project-card-url">{project.url.replace("https://", "")}</div>
       {project.status === "ready" ? (
-        <div className="project-card-meta">
-          <span>{project.files} files</span>
-          <span className="meta-sep">·</span>
-          <span>{project.indexedAt}</span>
-        </div>
+        <>
+          <div className="project-card-meta">
+            <span>{project.files} files</span>
+            <span className="meta-sep">·</span>
+            <span>{project.indexedAt}</span>
+          </div>
+          {v && (
+            <div className="security-badges">
+              {v.high > 0 && <span className="sec-badge high">🔴 {v.high} High</span>}
+              {v.medium > 0 && <span className="sec-badge medium">🟡 {v.medium} Med</span>}
+              {v.low > 0 && <span className="sec-badge low">🔵 {v.low} Low</span>}
+              {!hasVulns && <span className="sec-badge clean">✅ Secure</span>}
+              <span 
+                className="sec-badge" 
+                style={{ marginLeft: "auto", borderStyle: "dashed" }}
+                onClick={(e) => { e.stopPropagation(); onViewReport(project); }}
+              >
+                View Report
+              </span>
+            </div>
+          )}
+        </>
       ) : project.status === "error" ? (
         <div className="project-card-error">
           <span>⚠ {project.error || "Indexing failed. Please try again."}</span>

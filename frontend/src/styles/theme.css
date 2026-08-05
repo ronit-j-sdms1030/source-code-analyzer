@@ -245,12 +245,47 @@ body { margin: 0; padding: 0; }
 @keyframes bounce { 0%, 80%, 100% { opacity: 0.3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
 
 .chat-input-row { display: flex; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--border-hair); }
-.chat-input {
-  flex: 1; background: var(--bg-panel-raised); border: 1px solid var(--border-hair); border-radius: 8px;
-  padding: 12px 14px; color: var(--text-primary); font-family: inherit; font-size: 13.5px; outline: none;
-}
 .chat-input:focus { border-color: var(--accent); }
+
+/* ---- vulnerability modal ---- */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 24px; box-sizing: border-box; }
+.modal-content { background: var(--bg-panel); border: 1px solid var(--border-hair); border-radius: 12px; width: 100%; max-width: 800px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--border-hair); }
+.modal-title { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 18px; font-weight: 700; margin: 0; }
+.modal-subtitle { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-tertiary); margin: 4px 0 0; }
+.modal-close { background: none; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 16px; padding: 4px; }
+.modal-close:hover { color: var(--text-primary); }
+.modal-body { padding: 24px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px; }
+
+.vuln-item { background: var(--bg-panel-raised); border: 1px solid var(--border-hair); border-radius: 8px; padding: 16px; }
+.vuln-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.vuln-meta { display: flex; align-items: center; gap: 10px; }
+.vuln-badge { font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; border: 1px solid; letter-spacing: 0.05em; }
+.vuln-badge.high { color: #f87171; background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.2); }
+.vuln-badge.medium { color: #fbbf24; background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.2); }
+.vuln-badge.low { color: #60a5fa; background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.2); }
+.vuln-path { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); }
+.vuln-message { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary); }
+.vuln-code { background: var(--bg-void); border: 1px solid var(--border-hair); padding: 12px; border-radius: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--text-tertiary); overflow-x: auto; margin: 0; }
+
+.security-badges { display: flex; gap: 8px; margin-top: 12px; }
+.sec-badge { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid; cursor: pointer; }
+.sec-badge.high { color: #f87171; background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.2); }
+.sec-badge.medium { color: #fbbf24; background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.2); }
+.sec-badge.low { color: #60a5fa; background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.2); }
+.sec-badge.clean { color: #34d399; background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.2); }
+.sec-badge:hover { filter: brightness(1.2); }
 .send-btn { padding: 0 16px; border-radius: 8px; }
+
+/* ---- markdown body ---- */
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { color: var(--text-primary); margin-top: 16px; margin-bottom: 8px; }
+.markdown-body p { margin-bottom: 12px; }
+.markdown-body ul, .markdown-body ol { margin: 0 0 12px 20px; padding: 0; }
+.markdown-body li { margin-bottom: 4px; }
+.markdown-body code { background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 0.9em; }
+.markdown-body pre { background: var(--bg-void); padding: 12px; border-radius: 6px; overflow-x: auto; margin-bottom: 12px; border: 1px solid var(--border-hair); }
+.markdown-body pre code { background: none; padding: 0; border-radius: 0; }
+.markdown-body strong { color: var(--text-primary); font-weight: 700; }
 
 @media (prefers-reduced-motion: reduce) {
   .rail-node.active::before, .thinking .dot { animation: none; }

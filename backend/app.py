@@ -56,6 +56,34 @@ def chat():
     return jsonify(result)
 
 
+@app.get("/projects/<project_id>/vulnerabilities")
+def get_vulnerabilities(project_id):
+    import os
+    import json
+    report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+    if not os.path.exists(report_path):
+        return jsonify({"results": []})
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/projects/<project_id>/vulnerabilities/report")
+def generate_vuln_report(project_id):
+    from src.chain import generate_vulnerability_report
+    body = request.get_json(force=True)
+    finding = (body or {}).get("finding")
+    if not finding:
+        return jsonify({"error": "finding is required"}), 400
+    try:
+        report = generate_vulnerability_report(project_id, finding)
+        return jsonify({"report": report})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.delete("/projects/<project_id>")
 def remove_project(project_id):
     delete_project(project_id)

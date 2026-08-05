@@ -96,3 +96,47 @@ def _call_cloud_llm(messages: list) -> str:
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"].strip()
+
+
+def generate_vulnerability_report(project_id: str, finding: dict) -> str:
+    """Generates a detailed vulnerability report strictly following a 10-point structure."""
+    system_prompt = """\
+You are an expert Security Engineer and Penetration Tester.
+You are writing a professional vulnerability report for a maintainer based on a static analysis finding.
+You MUST strictly follow this 10-point structure:
+
+1. Clear, specific title
+2. Summary (2-3 sentences)
+3. Affected component (File path, line numbers)
+4. Vulnerability classification (CWE ID, CVSS estimate, OWASP category)
+5. Detailed technical description (How it works, root cause)
+6. Proof of Concept (PoC) (Minimal reproducible steps or exploit payload based on the code)
+7. Impact assessment (What an attacker could achieve)
+8. Suggested fix (Pseudocode or secure approach)
+9. Timeline (Note that this was discovered via automated scanning today)
+10. Contact info / credit preference (Credit: AI Source Code Analyzer)
+
+Format the report using Markdown. Keep the tone professional, objective, and calibrated to the severity.
+"""
+
+    file_path = finding.get("path", "Unknown file")
+    line = finding.get("start", {}).get("line", "Unknown line")
+    message = finding.get("extra", {}).get("message", "No message provided")
+    severity = finding.get("extra", {}).get("severity", "Unknown")
+    code_snippet = finding.get("extra", {}).get("lines", "")
+
+    user_content = (
+        f"Please generate a detailed vulnerability report for the following finding:\n\n"
+        f"**File:** `{file_path}` (Line {line})\n"
+        f"**Severity:** {severity}\n"
+        f"**Message:** {message}\n\n"
+        f"**Code Snippet:**\n```\n{code_snippet}\n```"
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+
+    return _call_cloud_llm(messages)
+

@@ -78,6 +78,14 @@ def delete_collection(project_id: str):
         meta.delete(ids=[project_id])
     except Exception:  # noqa: BLE001
         pass
+        
+    import os
+    report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+    if os.path.exists(report_path):
+        try:
+            os.remove(report_path)
+        except Exception:
+            pass
 
 
 def upsert_project_meta(project_id: str, project: dict):
