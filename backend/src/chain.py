@@ -12,16 +12,40 @@ SYSTEM_PROMPT = """\
 You are an expert software engineer and code reviewer. \
 You are given relevant excerpts from a real codebase and must answer the user's question clearly and concisely.
 
+You also have access to an automated Semgrep vulnerability report for this project. If the user asks about security issues, reference this report to provide accurate answers.
+
 Rules:
 - Write a proper, human-readable explanation — do NOT just repeat or paste the code chunks back.
-- Synthesize the information from the provided code to give a meaningful answer.
+- Synthesize the information from the provided code and vulnerability report to give a meaningful answer.
 - Mention which file(s) the answer comes from only when it adds useful context.
-- If the code chunks are not relevant enough to answer the question, say so honestly.
+- If the code chunks and report are not relevant enough to answer the question, say so honestly.
 - Keep answers concise but complete. Use bullet points or numbered lists when helpful.
 """
+def _get_vulnerability_summary(project_id: str) -> str:
+    import json
+    report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+    if not os.path.exists(report_path):
+        return "No vulnerability report available."
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        results = data.get("results", [])
+        if not results:
+            return "No vulnerabilities found."
+        
+        lines = []
+        for r in results:
+            sev = r.get("extra", {}).get("severity", "Unknown")
+            path = r.get("path", "Unknown")
+            line = r.get("start", {}).get("line", "?")
+            msg = r.get("extra", {}).get("message", "No message").split('\n')[0]
+            lines.append(f"- [{sev}] {path}:{line} - {msg}")
+        return "\n".join(lines)
+    except Exception:
+        return "Error reading vulnerability report."
 
 
-def _build_prompt(question: str, chunks: list, history: list, file_tree: str = "Unknown") -> list:
+def _build_prompt(question: str, chunks: list, history: list, file_tree: str = "Unknown", vuln_summary: str = "") -> list:
     """Returns a messages list for the chat completions API."""
     # Use short relative-style paths to reduce noise in the context
     context_parts = []
@@ -30,7 +54,7 @@ def _build_prompt(question: str, chunks: list, history: list, file_tree: str = "
         context_parts.append(f"--- {short_path} ---\n{c['text']}")
     context = "\n\n".join(context_parts)
 
-    system_prompt = f"{SYSTEM_PROMPT}\n\nRepository File Tree:\n{file_tree}"
+    system_prompt = f"{SYSTEM_PROMPT}\n\nRepository File Tree:\n{file_tree}\n\nVulnerability Report:\n{vuln_summary}"
     messages = [{"role": "system", "content": system_prompt}]
 
     # Inject prior conversation turns
@@ -62,8 +86,10 @@ def answer_question(project_id: str, question: str) -> dict:
     meta = get_project_meta(project_id)
     file_tree = meta.get("file_tree", "File tree not available.") if meta else "File tree not available."
 
+    vuln_summary = _get_vulnerability_summary(project_id)
+
     history = _history.setdefault(project_id, [])
-    messages = _build_prompt(question, chunks, history, file_tree)
+    messages = _build_prompt(question, chunks, history, file_tree, vuln_summary)
 
     answer = _call_cloud_llm(messages)
 

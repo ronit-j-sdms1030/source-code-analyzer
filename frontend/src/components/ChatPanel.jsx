@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import Icon from "./icons";
 import { MODEL_NAME } from "../lib/api";
 
@@ -14,7 +15,9 @@ export function ChatMessage({ msg }) {
           </span>
         ) : (
           <>
-            <p className="msg-text">{msg.text}</p>
+            <div className="msg-text">
+              <ReactMarkdown>{msg.text}</ReactMarkdown>
+            </div>
             {msg.sources && msg.sources.length > 0 && (
               <div className="source-chips">
                 {msg.sources.map((s) => (
@@ -72,16 +75,32 @@ export default function ChatPanel({ project, onAsk }) {
         ))}
       </div>
 
-      <form className="chat-input-row" onSubmit={submit}>
-        <input
-          className="chat-input"
-          placeholder={`Ask ${project.name} a question — e.g. "where is the database session created?"`}
+      <form className="chat-input-wrapper" onSubmit={submit}>
+        <textarea
+          className="chat-input-box"
+          placeholder="Ask anything, @ to mention, / for actions"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit(e);
+            }
+          }}
+          rows={1}
         />
-        <button type="submit" className="btn-accent send-btn" disabled={!draft.trim()}>
-          <Icon.Send />
-        </button>
+        <div className="chat-input-toolbar">
+          <div className="toolbar-left">
+            <button type="button" className="toolbar-btn plus-btn">
+              <Icon.Plus />
+            </button>
+          </div>
+          <div className="toolbar-right">
+            <button type="submit" className="toolbar-btn send-btn-round" disabled={!draft.trim()}>
+              <Icon.ArrowRight />
+            </button>
+          </div>
+        </div>
       </form>
     </div>
   );
