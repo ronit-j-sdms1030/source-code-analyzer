@@ -44,7 +44,7 @@ export function ChatMessage({ msg }) {
                           display: "inline-block"
                         }}
                       >
-                        {window.chatFixingFor === vulnNum ? "Fixing..." : window.chatFixStatus?.[vulnNum] === 'success' ? "✓ Fixed" : `Fix`}
+                        {window.chatFixingFor === vulnNum ? "Fixing..." : window.chatFixStatus?.[vulnNum] === 'success' ? "Fixed" : `Fix`}
                       </button>
                     );
                   }
