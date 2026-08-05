@@ -6,7 +6,7 @@
 //   GET  /projects                                        -> [ project, ... ]
 //   DELETE /projects/:id                                  -> { ok: true }
 
-export const MODEL_NAME = "Llama 3.1 8B (Chat) / Qwen Coder 32B (Fix)";
+export const MODEL_NAME = "Llama 3.1 8B (Chat) / Qwen 2.5 7B (Fix)";
 
 const BASE_URL = ""; // same-origin; Flask serves the built frontend + API
 
