@@ -303,7 +303,7 @@ Brief description of the fix.
             fixed_content = file_content
             description += "\n\n(Warning: Autofix failed to apply because the search block did not exactly match the file)."
     else:
-        # Fallback to old behavior if LLM didn't use the block
+        # Fallback to old behavior if LLM didn't use the SEARCH/REPLACE block
         parts = response.split("```")
         if len(parts) >= 3:
             description = parts[0].strip() or "Fixed the vulnerability."
@@ -313,8 +313,8 @@ Brief description of the fix.
                 lines = lines[1:]
             fixed_content = "\n".join(lines).strip()
         else:
-            description = "Fixed the vulnerability."
-            fixed_content = response
+            description = "Autofix failed: The AI did not output a valid SEARCH/REPLACE block or code block format."
+            fixed_content = file_content
         
     # Write the fixed content back to disk
     with open(full_path, "w", encoding="utf-8") as f:
