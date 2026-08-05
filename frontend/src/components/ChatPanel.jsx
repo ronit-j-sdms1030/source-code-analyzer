@@ -257,7 +257,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
                 }
                 
                 try {
-                  const res = await fetch(`http://127.0.0.1:5000/projects/${project.id}/push`, {
+                  const res = await fetch(`/projects/${project.id}/push`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ token, branch, commit_message: commitMessage })
