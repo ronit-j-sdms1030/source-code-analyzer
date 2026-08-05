@@ -82,7 +82,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete }) {
             <span className="stat-num">{project.files}</span>
             <span className="stat-label">Files</span>
           </div>
-          <div className="stat" style={{ display: 'flex', gap: '4px', alignItems: 'center', marginLeft: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', alignItems: 'center', marginLeft: '12px' }}>
             <button
               className="action-btn"
               title="Download Code Repository (.zip)"

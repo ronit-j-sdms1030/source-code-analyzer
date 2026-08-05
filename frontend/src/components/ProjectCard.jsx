@@ -45,7 +45,6 @@ export default function ProjectCard({ project, active, onSelect, onDelete, onVie
       ) : (
         <PipelineRail stageIndex={project.stageIndex} size="mini" />
       )}
-      )}
     </div>
   );
 }
