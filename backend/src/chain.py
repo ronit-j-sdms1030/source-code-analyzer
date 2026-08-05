@@ -302,8 +302,16 @@ Brief description of the fix.
             # Fallback if exact match fails
             fixed_content = file_content
             description += f"\n\n**(Warning: Autofix failed to apply because the search block did not exactly match the file).**\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n```\n{replace_block}\n```"
+    elif "<<<<" in response and "====" not in response:
+        # The model dumped the entire file after <<<<
+        description = response.split("<<<<")[0].strip() or "Fixed the vulnerability."
+        fixed_content = response.split("<<<<")[1].replace(">>>>", "").strip()
+        # Sanity check: don't wipe the file if the model only generated a tiny snippet
+        if len(fixed_content) < len(file_content) * 0.2:
+            description = f"**Autofix failed:** The AI output a partial snippet instead of the full file.\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n{response}"
+            fixed_content = file_content
     else:
-        # Fallback to old behavior if LLM didn't use the SEARCH/REPLACE block
+        # Fallback to old behavior if LLM didn't use the SEARCH/REPLACE block at all
         parts = response.split("```")
         if len(parts) >= 3:
             description = parts[0].strip() or "Fixed the vulnerability."
