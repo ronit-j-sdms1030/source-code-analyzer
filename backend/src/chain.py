@@ -304,11 +304,14 @@ Rules:
     ))
     diff_text = "".join(diff)
     
+    additions = sum(1 for line in diff if line.startswith('+') and not line.startswith('+++'))
+    deletions = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
+    
     # Strip any dangling trailing prompts from the description
     description = description.replace("Fixed File Content:", "").strip()
     
     if diff_text:
-        final_message = f"{description}\n\n**Changes in `{file_path}`:**\n```diff\n{diff_text}\n```"
+        final_message = f"{description}\n\n**Changes in `{file_path}` (+{additions}, -{deletions}):**\n```diff\n{diff_text}\n```"
     else:
         final_message = description
         

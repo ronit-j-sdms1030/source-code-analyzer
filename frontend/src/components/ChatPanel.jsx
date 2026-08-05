@@ -4,6 +4,45 @@ import Icon from "./icons";
 import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities } from "../lib/api";
 import { MODEL_NAME } from "../lib/api";
 
+const CodeBlock = ({ node, inline, className, children, ...props }) => {
+  const match = /language-(\w+)/.exec(className || "");
+  const lang = match ? match[1] : "";
+  const codeText = String(children).replace(/\n$/, "");
+
+  if (!inline && lang === "diff") {
+    return (
+      <pre className={className} style={{ backgroundColor: "#1e1e1e", padding: "12px", borderRadius: "6px", overflowX: "auto", fontSize: "13px", lineHeight: "1.5" }}>
+        <code className={className} {...props}>
+          {codeText.split("\n").map((line, i) => {
+            let color = "#d4d4d4";
+            if (line.startsWith("+") && !line.startsWith("+++")) color = "#4ade80"; // green
+            else if (line.startsWith("-") && !line.startsWith("---")) color = "#f87171"; // red
+            else if (line.startsWith("@@")) color = "#a78bfa"; // purple
+            
+            return (
+              <div key={i} style={{ color, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                {line || " "}
+              </div>
+            );
+          })}
+        </code>
+      </pre>
+    );
+  }
+  
+  return !inline ? (
+    <pre className={className} style={{ backgroundColor: "#1e1e1e", padding: "12px", borderRadius: "6px", overflowX: "auto", fontSize: "13px", color: "#d4d4d4", lineHeight: "1.5" }}>
+      <code className={className} {...props}>
+        {children}
+      </code>
+    </pre>
+  ) : (
+    <code className={className} style={{ backgroundColor: "rgba(0,0,0,0.1)", padding: "2px 4px", borderRadius: "3px" }} {...props}>
+      {children}
+    </code>
+  );
+};
+
 export function ChatMessage({ msg }) {
   const isUser = msg.role === "user";
   return (
@@ -18,9 +57,9 @@ export function ChatMessage({ msg }) {
           <>
             <div className="msg-text">
               {(() => {
-                if (isUser || !msg.text) return <ReactMarkdown>{msg.text}</ReactMarkdown>;
+                if (isUser || !msg.text) return <ReactMarkdown components={{ code: CodeBlock }}>{msg.text}</ReactMarkdown>;
                 const parts = msg.text.split(/\[ACTION:FIX:(\d+)\]/);
-                if (parts.length === 1) return <ReactMarkdown>{msg.text}</ReactMarkdown>;
+                if (parts.length === 1) return <ReactMarkdown components={{ code: CodeBlock }}>{msg.text}</ReactMarkdown>;
                 let fixButtonIndex = 1;
                 return parts.map((part, i) => {
                   if (i % 2 === 1) {
@@ -48,7 +87,7 @@ export function ChatMessage({ msg }) {
                       </button>
                     );
                   }
-                  return <ReactMarkdown key={i}>{part}</ReactMarkdown>;
+                  return <ReactMarkdown components={{ code: CodeBlock }} key={i}>{part}</ReactMarkdown>;
                 });
               })()}
             </div>
