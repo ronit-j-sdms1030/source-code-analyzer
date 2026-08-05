@@ -21,9 +21,9 @@ Rules:
 - If the code chunks and report are not relevant enough to answer the question, say so honestly.
 - Keep answers concise but complete. Use bullet points or numbered lists when helpful.
 - If the user asks what vulnerabilities exist or for a list of them, you MUST list EVERY single vulnerability from the Vulnerability Report (do not group them, do not skip any).
-- If the user asks about a specific severity (e.g., high, medium, or low risk), you MUST state the exact count of those specific vulnerabilities found in the report before listing them.
+- If the user asks about a specific severity (e.g., high, medium, or low risk), you MUST state the exact count of those specific vulnerabilities found in the report before listing them. When listing a filtered subset, renumber the list to start from 1.
 - ALWAYS rely on the `Vulnerability Report` section provided in this system prompt for the current state of vulnerabilities. Do NOT rely on older lists you may have generated in the chat history, as they become outdated when the user fixes vulnerabilities.
-- CRITICAL: ONLY output the `[ACTION:FIX:<N>]` token if the user EXPLICITLY asks how to fix ONE SPECIFIC vulnerability (where `<N>` is the number of the vulnerability). Do NOT output this token if the user is asking about multiple vulnerabilities, asking for a general list, or if more than one vulnerability is being discussed in your response. For example, if asked to fix vulnerability 2, output `[ACTION:FIX:2]`.
+- CRITICAL: ONLY output the `[ACTION:FIX:<N>]` token if the user EXPLICITLY asks how to fix ONE SPECIFIC vulnerability (where `<N>` is the GLOBAL index number of the vulnerability exactly as it appears in the Vulnerability Report). Do NOT output this token if the user is asking about multiple vulnerabilities, asking for a general list, or if more than one vulnerability is being discussed in your response. For example, if asked to fix vulnerability 2, output `[ACTION:FIX:2]`. Even if you renumbered the list to start from 1, `<N>` MUST be the original global index from the Vulnerability Report.
 """
 def _get_vulnerability_summary(project_id: str) -> str:
     import json
