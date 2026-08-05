@@ -14,7 +14,8 @@ REPORTS_DIR = os.path.join(DATA_DIR, "reports")
 
 CLOUD_API_URL = os.environ.get("CLOUD_API_URL", "https://openrouter.ai/api/v1")
 CLOUD_API_KEY = os.environ.get("CLOUD_API_KEY", "")
-CLOUD_MODEL = os.environ.get("CLOUD_MODEL", "qwen/qwen-2.5-coder-7b-instruct")
+CLOUD_MODEL = os.environ.get("CLOUD_MODEL", "meta-llama/llama-3.1-8b-instruct")
+CLOUD_FIX_MODEL = os.environ.get("CLOUD_FIX_MODEL", "qwen/qwen-2.5-coder-7b-instruct")
 
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 

@@ -166,7 +166,7 @@ def answer_question(project_id: str, question: str) -> dict:
     return {"answer": answer, "sources": sources}
 
 
-def _call_cloud_llm(messages: list) -> str:
+def _call_cloud_llm(messages: list, model_name: str = None) -> str:
     import requests
 
     headers = {
@@ -175,7 +175,7 @@ def _call_cloud_llm(messages: list) -> str:
     }
 
     payload = {
-        "model": config.CLOUD_MODEL,
+        "model": model_name or config.CLOUD_MODEL,
         "messages": messages,
         "temperature": 0.2,
     }
@@ -288,7 +288,7 @@ Brief description of the fix.
         {"role": "user", "content": user_content}
     ]
     
-    response = _call_cloud_llm(messages)
+    response = _call_cloud_llm(messages, model_name=config.CLOUD_FIX_MODEL)
     
     # Extract the description and the code block from the response
     if "<<<<" in response and "====" in response and ">>>>" in response:
