@@ -217,6 +217,8 @@ def push_repo(project_id):
             origin.set_url(authed_url)
             
         try:
+            # Disable terminal prompt so git doesn't hang waiting for credentials
+            os.environ["GIT_TERMINAL_PROMPT"] = "0"
             # Push the branch
             origin.push(branch_name)
         finally:
@@ -227,8 +229,9 @@ def push_repo(project_id):
         return jsonify({"ok": True, "branch": branch_name, "message": f"Successfully pushed to branch '{branch_name}' on GitHub!"})
         
     except git.exc.GitCommandError as e:
-        if "Authentication failed" in str(e) or "403" in str(e) or "401" in str(e):
-            return jsonify({"error": "Authentication failed. The repository is either private or requires a GitHub Personal Access Token (PAT) to push. Please provide a valid PAT."}), 401
+        err_msg = str(e).lower()
+        if "authentication failed" in err_msg or "403" in err_msg or "401" in err_msg or "terminal prompts disabled" in err_msg or "could not read username" in err_msg:
+            return jsonify({"error": "Authentication failed. The repository requires a GitHub Personal Access Token (PAT) to push. Please provide a valid PAT when prompted."}), 401
         return jsonify({"error": f"Git error: {str(e)}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
