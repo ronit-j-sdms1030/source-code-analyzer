@@ -117,6 +117,21 @@ def auto_fix_vulnerability(project_id):
                 if len(report_data["results"]) < original_len:
                     with open(report_path, "w", encoding="utf-8") as f:
                         json.dump(report_data, f, indent=2)
+                        
+                    # Update in-memory counts and db so badges update immediately
+                    counts = {"high": 0, "medium": 0, "low": 0}
+                    for res in report_data["results"]:
+                        sev = res.get("extra", {}).get("severity", "").lower()
+                        if sev in ("error", "high"): counts["high"] += 1
+                        elif sev in ("warning", "medium"): counts["medium"] += 1
+                        else: counts["low"] += 1
+                        
+                    from src.ingestion import _projects, _lock
+                    with _lock:
+                        if project_id in _projects:
+                            from src.vectorstore import upsert_project_meta
+                            _projects[project_id]["vulnerabilities"] = counts
+                            upsert_project_meta(project_id, {**_projects[project_id]})
 
         return jsonify(result)
     except Exception as e:
