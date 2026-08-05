@@ -109,11 +109,20 @@ def rescan_vulnerabilities(project_id: str) -> dict:
     
     vuln_counts = _run_semgrep(project_id, repo_path)
     
+    from .vectorstore import get_project_meta, upsert_project_meta
+    
     with _lock:
+        project = None
         if project_id in _projects:
-            from .vectorstore import upsert_project_meta
             _projects[project_id]["vulnerabilities"] = vuln_counts
-            upsert_project_meta(project_id, {**_projects[project_id]})
+            project = _projects[project_id]
+        else:
+            project = get_project_meta(project_id)
+            if project:
+                project["vulnerabilities"] = vuln_counts
+                
+        if project:
+            upsert_project_meta(project_id, project)
     
     return vuln_counts
 
