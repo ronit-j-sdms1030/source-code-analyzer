@@ -262,6 +262,10 @@ Rules:
 2. Then, provide a SEARCH/REPLACE block that replaces the vulnerable code with the fixed code.
 3. The SEARCH block MUST be an EXACT, character-for-character match of the original code, including whitespace and indentation.
 
+Security Guidelines:
+- Dockerfile Root Vulnerabilities: If fixing a container running as root, you MUST create a non-root user (e.g., `RUN useradd -m appuser`) AND explicitly switch to it using the `USER appuser` directive. Just creating the user is not enough!
+- CDN Integrity Hashes (SRI): If fixing a missing `integrity` attribute on a `<script>` or `<link>`, DO NOT add a fake or hallucinated hash, and DO NOT add hashes to `@latest` or unpinned URLs. A fake hash will instantly break the website. If you do not know the exact real hash for a specific pinned version, do NOT insert an `integrity` attribute. Instead, simply write a comment in the code (e.g. `<!-- TODO: Add SRI hash for pinned version -->`) or explain in your description that you cannot fix it automatically without internet access.
+
 Format your response EXACTLY like this:
 
 Brief description of the fix.
