@@ -197,6 +197,26 @@ export default function SourceCodeAnalyzer() {
             </div>
           )}
           {selected && selected.status === "ready" && <ChatPanel project={selected} onAsk={askQuestion} onViewReport={setReportProject} onDelete={deleteProjectHandler} />}
+          {selected && selected.status === "error" && (
+            <div className="indexing-view" style={{ textAlign: "center" }}>
+              <div className="empty-eyebrow" style={{ color: "var(--status-error)" }}>FAILED · {selected.name}</div>
+              <h2 className="indexing-title">Indexing failed</h2>
+              <p className="indexing-note" style={{ color: "var(--status-error)" }}>
+                {selected.error || "An unknown error occurred during indexing."}
+              </p>
+              <button
+                className="btn-accent"
+                style={{ marginTop: "24px", background: "var(--status-error)" }}
+                onClick={() => {
+                  if (window.confirm(`Are you sure you want to delete ${selected.name}?`)) {
+                    deleteProjectHandler(selected.id);
+                  }
+                }}
+              >
+                Delete Repository
+              </button>
+            </div>
+          )}
         </main>
       </div>
 

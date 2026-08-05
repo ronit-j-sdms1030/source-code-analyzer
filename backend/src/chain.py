@@ -34,12 +34,12 @@ def _get_vulnerability_summary(project_id: str) -> str:
             return "No vulnerabilities found."
         
         lines = []
-        for r in results:
+        for i, r in enumerate(results, start=1):
             sev = r.get("extra", {}).get("severity", "Unknown")
             path = r.get("path", "Unknown")
             line = r.get("start", {}).get("line", "?")
             msg = r.get("extra", {}).get("message", "No message").split('\n')[0]
-            lines.append(f"- [{sev}] {path}:{line} - {msg}")
+            lines.append(f"{i}. [{sev}] {path}:{line} - {msg}")
         return "\n".join(lines)
     except Exception:
         return "Error reading vulnerability report."

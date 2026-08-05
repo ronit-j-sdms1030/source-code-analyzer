@@ -79,7 +79,7 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
     
     try:
         subprocess.run(
-            ["semgrep", "scan", "--config", "auto", "--config", "custom_rules.yml", "--json", "--output", report_path, repo_path],
+            ["semgrep", "scan", "--config", "auto", "--config", "custom_rules.yml", "--no-git-ignore", "--exclude", ".git", "--json", "--output", report_path, repo_path],
             check=False,  # Returns non-zero if issues are found, which is normal
             capture_output=True,
         )
@@ -215,14 +215,14 @@ def _clone_repo(project_id: str, url: str, token: str = "") -> str:
     dest = f"{config.REPOS_DIR}/{project_id}"
     os.makedirs(dest, exist_ok=True)
     try:
-        Repo.clone_from(clone_url, dest, depth=1)
+        Repo.clone_from(clone_url, dest, depth=1, env={"GIT_TERMINAL_PROMPT": "0"})
     except Exception as exc:
         import shutil
         shutil.rmtree(dest, ignore_errors=True)
         stderr = str(exc).lower()
         print(f"[clone error] {exc}", flush=True)
         # Produce a friendly message based on the git error and whether a token was provided
-        if "repository not found" in stderr or "not found" in stderr:
+        if "repository not found" in stderr or "not found" in stderr or "terminal prompts disabled" in stderr:
             if not token:
                 raise RuntimeError(
                     "This appears to be a private repository. "

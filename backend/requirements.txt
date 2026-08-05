@@ -7,3 +7,4 @@ chromadb>=0.5
 requests>=2.31
 python-dotenv>=1.0.0
 semgrep>=1.0.0
+fpdf2>=2.7.9

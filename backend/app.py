@@ -111,7 +111,15 @@ def download_report(project_id):
     report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
     if not os.path.exists(report_path):
         return jsonify({"error": "report not found"}), 404
-    return send_file(report_path, as_attachment=True, download_name=f"{project_id}_vulnerabilities.json")
+    from src.pdf_generator import generate_vulnerability_pdf
+    pdf_path = os.path.join(config.REPORTS_DIR, f"{project_id}.pdf")
+    
+    try:
+        generate_vulnerability_pdf(project_id, report_path, pdf_path)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+        
+    return send_file(pdf_path, as_attachment=True, download_name=f"{project_id}_vulnerabilities.pdf")
 
 
 # Serve the built frontend (frontend/vite.config.js builds into ./static).

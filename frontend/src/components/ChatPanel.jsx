@@ -93,7 +93,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete }) {
             {hasVulns && (
               <button
                 className="action-btn"
-                title="Download Vulnerability Report (.json)"
+                title="Download Vulnerability Report (.pdf)"
                 onClick={() => window.open(`http://127.0.0.1:5000/projects/${project.id}/download/report`)}
               >
                 <Icon.File />

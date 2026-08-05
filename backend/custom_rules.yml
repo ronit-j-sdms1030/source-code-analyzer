@@ -13,3 +13,52 @@ rules:
       - typescript
       - python
     severity: HIGH
+
+  - id: catch-syntax-error
+    message: "Syntax / Logic Error: Missing closing brace for object."
+    severity: ERROR
+    languages:
+      - regex
+    pattern-regex: 'const data = { status: "active"'
+
+  - id: catch-sqli
+    message: "SQL Injection (SQLi): user input concatenated directly into a raw SQL query."
+    severity: ERROR
+    languages:
+      - regex
+    pattern-regex: 'SELECT .* FROM .* WHERE .* = \$\{.*\}'
+
+  - id: catch-cmd-injection
+    message: "OS Command Injection: user input passed directly into child_process.exec()."
+    severity: ERROR
+    languages:
+      - regex
+    pattern-regex: 'exec\(.*req\.query.*\)'
+
+  - id: hardcoded-stripe-key
+    message: "Hardcoded Secrets in Source Code: A sensitive Stripe testing key is hardcoded directly into the JavaScript file."
+    severity: ERROR
+    languages:
+      - regex
+    pattern-regex: '(sk_test_|sk_live_)[a-zA-Z0-9]+'
+
+  - id: exposed-aws-key
+    message: "Exposed Secrets and Configs: An exposed AWS Access Key ID"
+    severity: ERROR
+    languages:
+      - regex
+    pattern-regex: 'AKIA[0-9A-Z]{16}'
+
+  - id: exposed-github-token
+    message: "Exposed Secrets and Configs: An exposed GitHub Personal Access Token"
+    severity: ERROR
+    languages:
+      - regex
+    pattern-regex: 'ghp_[0-9a-zA-Z]{36}'
+
+  - id: exposed-db-password
+    message: "Exposed Secrets and Configs: An exposed Database Password"
+    severity: ERROR
+    languages:
+      - regex
+    pattern-regex: '(?i)(password)\s*=\s*.+'
