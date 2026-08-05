@@ -53,6 +53,19 @@ export function generateVulnReport(id, finding) {
   });
 }
 
+export function autoFixVulnerability(id, finding) {
+  return request(`/projects/${id}/vulnerabilities/autofix`, {
+    method: "POST",
+    body: JSON.stringify({ finding }),
+  });
+}
+
+export function rescanVulnerabilities(id) {
+  return request(`/projects/${id}/vulnerabilities/rescan`, {
+    method: "POST",
+  });
+}
+
 export function askQuestion(projectId, question) {
   return request("/chat", {
     method: "POST",

@@ -20,6 +20,10 @@ Rules:
 - Mention which file(s) the answer comes from only when it adds useful context.
 - If the code chunks and report are not relevant enough to answer the question, say so honestly.
 - Keep answers concise but complete. Use bullet points or numbered lists when helpful.
+- If the user asks what vulnerabilities exist or for a list of them, you MUST list EVERY single vulnerability from the Vulnerability Report (do not group them, do not skip any).
+- If the user asks about a specific severity (e.g., high, medium, or low risk), you MUST state the exact count of those specific vulnerabilities found in the report before listing them.
+- ALWAYS rely on the `Vulnerability Report` section provided in this system prompt for the current state of vulnerabilities. Do NOT rely on older lists you may have generated in the chat history, as they become outdated when the user fixes vulnerabilities.
+- CRITICAL: ONLY output the `[ACTION:FIX:<N>]` token if the user EXPLICITLY asks how to fix ONE SPECIFIC vulnerability (where `<N>` is the number of the vulnerability). Do NOT output this token if the user is asking about multiple vulnerabilities, asking for a general list, or if more than one vulnerability is being discussed in your response. For example, if asked to fix vulnerability 2, output `[ACTION:FIX:2]`.
 """
 def _get_vulnerability_summary(project_id: str) -> str:
     import json
@@ -35,11 +39,27 @@ def _get_vulnerability_summary(project_id: str) -> str:
         
         lines = []
         for i, r in enumerate(results, start=1):
-            sev = r.get("extra", {}).get("severity", "Unknown")
+            sev = r.get("extra", {}).get("severity", "Unknown").upper()
+            if sev == "ERROR":
+                sev_label = "High"
+            elif sev == "WARNING":
+                sev_label = "Medium"
+            elif sev == "INFO":
+                sev_label = "Low"
+            else:
+                sev_label = sev
+                
             path = r.get("path", "Unknown")
+            parts = path.split(f"/{project_id}/")
+            if len(parts) > 1:
+                path = parts[-1]
+            else:
+                import os
+                path = os.path.basename(path)
+                
             line = r.get("start", {}).get("line", "?")
             msg = r.get("extra", {}).get("message", "No message").split('\n')[0]
-            lines.append(f"{i}. [{sev}] {path}:{line} - {msg}")
+            lines.append(f"{i}. [{sev_label} Risk] {path}:{line} - {msg}")
         return "\n".join(lines)
     except Exception:
         return "Error reading vulnerability report."
@@ -168,3 +188,65 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
 
     return _call_cloud_llm(messages)
 
+
+def apply_auto_fix(project_id: str, finding: dict) -> dict:
+    """Generates a fix for the vulnerability and applies it directly to the file on disk."""
+    import os
+    file_path = finding.get("path", "")
+    if not file_path:
+        raise ValueError("Finding does not contain a file path.")
+    
+    full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
+    if not os.path.exists(full_path):
+        raise ValueError(f"File not found on disk: {file_path}")
+        
+    with open(full_path, "r", encoding="utf-8") as f:
+        file_content = f.read()
+        
+    message = finding.get("extra", {}).get("message", "No message provided")
+    line = finding.get("start", {}).get("line", "?")
+    
+    system_prompt = """\
+You are an expert Security Engineer and software developer.
+You will be provided with the full content of a source code file that contains a security vulnerability.
+Your task is to fix the vulnerability and return the *entire* corrected file content.
+
+Rules:
+1. First, write a brief 1-3 sentence description of exactly how you fixed the vulnerability.
+2. Then, output the fixed file content.
+3. You MUST wrap the file content in a single standard markdown code block (e.g. ```javascript ... ``` or ```python ... ```).
+4. Do NOT truncate the file; return the full file with the fix applied.
+"""
+    
+    user_content = (
+        f"Vulnerability Message: {message}\n"
+        f"Line Number: {line}\n\n"
+        f"File Content:\n```\n{file_content}\n```"
+    )
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    
+    response = _call_cloud_llm(messages)
+    
+    # Extract the description and the code block from the response
+    description = "Fixed the vulnerability."
+    parts = response.split("```")
+    if len(parts) >= 3:
+        description = parts[0].strip() or "Fixed the vulnerability."
+        lines = parts[1].split("\n")
+        if lines and not lines[0].strip().startswith(("import", "def", "class", "/", "*")):
+            # It might be the language identifier like `javascript`
+            lines = lines[1:]
+        fixed_content = "\n".join(lines).strip()
+    else:
+        # Fallback if LLM didn't use code blocks
+        fixed_content = response
+        
+    # Write the fixed content back to disk
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(fixed_content)
+        
+    return {"status": "success", "file": file_path, "message": description}

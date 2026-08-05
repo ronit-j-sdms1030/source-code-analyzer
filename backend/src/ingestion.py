@@ -101,6 +101,22 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
         print(f"[semgrep error] {e}", flush=True)
         return {"high": 0, "medium": 0, "low": 0}
 
+def rescan_vulnerabilities(project_id: str) -> dict:
+    import os
+    repo_path = os.path.join(config.REPOS_DIR, project_id)
+    if not os.path.exists(repo_path):
+        raise ValueError("Repository files not found on disk. Rescan impossible.")
+    
+    vuln_counts = _run_semgrep(project_id, repo_path)
+    
+    with _lock:
+        if project_id in _projects:
+            from .vectorstore import upsert_project_meta
+            _projects[project_id]["vulnerabilities"] = vuln_counts
+            upsert_project_meta(project_id, {**_projects[project_id]})
+    
+    return vuln_counts
+
 
 def _generate_repo_tree(repo_path: str) -> str:
     """Generates a text representation of the file tree for LLM context."""
@@ -162,9 +178,7 @@ def _run_pipeline(project_id: str, url: str, token: str = ""):
         write_chunks(project_id, chunks, vectors)
         _set_stage(project_id, 6)
 
-        # Post-indexing cleanup: raw repo files aren't needed once vectors persist.
-        import shutil
-        shutil.rmtree(repo_path, ignore_errors=True)
+        # Post-indexing cleanup: (Removed to allow autofix feature to work on repo files)
 
         result = {
             "status": "ready",

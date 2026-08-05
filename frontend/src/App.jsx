@@ -101,6 +101,20 @@ export default function SourceCodeAnalyzer() {
     });
   };
 
+  const refreshProjectData = async () => {
+    try {
+      const list = await listProjects();
+      setProjects((prev) => 
+        prev.map(p => {
+          const fresh = list.find(l => l.id === p.id);
+          return fresh ? { ...fresh, messages: p.messages } : p;
+        })
+      );
+    } catch(err) {
+      console.error("Failed to refresh project data", err);
+    }
+  };
+
   const askQuestion = async (projectId, question) => {
     updateProject(projectId, (p) => ({
       messages: [...p.messages, { role: "user", text: question }, { role: "assistant", pending: true }],
@@ -119,6 +133,12 @@ export default function SourceCodeAnalyzer() {
         return { messages: msgs };
       });
     }
+  };
+
+  const addMessage = (projectId, role, text) => {
+    updateProject(projectId, (p) => ({
+      messages: [...p.messages, { role, text, sources: [] }],
+    }));
   };
 
   return (
@@ -196,7 +216,7 @@ export default function SourceCodeAnalyzer() {
               </p>
             </div>
           )}
-          {selected && selected.status === "ready" && <ChatPanel project={selected} onAsk={askQuestion} onViewReport={setReportProject} onDelete={deleteProjectHandler} />}
+          {selected && selected.status === "ready" && <ChatPanel project={selected} onAsk={askQuestion} onViewReport={() => setReportProject(selected)} onDelete={deleteProjectHandler} onRefresh={refreshProjectData} onAddMessage={addMessage} />}
           {selected && selected.status === "error" && (
             <div className="indexing-view" style={{ textAlign: "center" }}>
               <div className="empty-eyebrow" style={{ color: "var(--status-error)" }}>FAILED · {selected.name}</div>
@@ -217,14 +237,16 @@ export default function SourceCodeAnalyzer() {
               </button>
             </div>
           )}
+
         </main>
       </div>
 
       {reportProject && (
         <VulnerabilityModal 
-          projectId={reportProject.id} 
-          projectName={reportProject.name} 
+          project={reportProject} 
           onClose={() => setReportProject(null)} 
+          onRefresh={refreshProjectData}
+          onAddMessage={addMessage}
         />
       )}
     </div>

@@ -84,6 +84,54 @@ def generate_vuln_report(project_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.post("/projects/<project_id>/vulnerabilities/autofix")
+def auto_fix_vulnerability(project_id):
+    from src.chain import apply_auto_fix
+    import os
+    import json
+    
+    body = request.get_json(force=True)
+    finding = (body or {}).get("finding")
+    if not finding:
+        return jsonify({"error": "finding is required"}), 400
+    try:
+        result = apply_auto_fix(project_id, finding)
+        
+        # Remove the finding from the report.json to keep it in sync
+        report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+        if os.path.exists(report_path):
+            with open(report_path, "r", encoding="utf-8") as f:
+                report_data = json.load(f)
+            
+            if "results" in report_data:
+                original_len = len(report_data["results"])
+                # Filter out the matching finding
+                report_data["results"] = [
+                    r for r in report_data["results"] 
+                    if not (r.get("path") == finding.get("path") and 
+                            r.get("start", {}).get("line") == finding.get("start", {}).get("line") and 
+                            r.get("extra", {}).get("message") == finding.get("extra", {}).get("message"))
+                ]
+                
+                # If we actually removed something, save it back
+                if len(report_data["results"]) < original_len:
+                    with open(report_path, "w", encoding="utf-8") as f:
+                        json.dump(report_data, f, indent=2)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.post("/projects/<project_id>/vulnerabilities/rescan")
+def rescan_vulnerabilities_route(project_id):
+    from src.ingestion import rescan_vulnerabilities
+    try:
+        counts = rescan_vulnerabilities(project_id)
+        return jsonify({"vulnerabilities": counts})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.delete("/projects/<project_id>")
 def remove_project(project_id):
     delete_project(project_id)

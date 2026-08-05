@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import Icon from "./icons";
+import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities } from "../lib/api";
 import { MODEL_NAME } from "../lib/api";
 
 export function ChatMessage({ msg }) {
@@ -16,7 +17,40 @@ export function ChatMessage({ msg }) {
         ) : (
           <>
             <div className="msg-text">
-              <ReactMarkdown>{msg.text}</ReactMarkdown>
+              {(() => {
+                if (isUser || !msg.text) return <ReactMarkdown>{msg.text}</ReactMarkdown>;
+                const parts = msg.text.split(/\[ACTION:FIX:(\d+)\]/);
+                if (parts.length === 1) return <ReactMarkdown>{msg.text}</ReactMarkdown>;
+                let fixButtonIndex = 1;
+                return parts.map((part, i) => {
+                  if (i % 2 === 1) {
+                    const vulnNum = parseInt(part, 10);
+                    const displayNum = fixButtonIndex++;
+                    return (
+                      <button 
+                        key={i} 
+                        onClick={() => window.onChatAutoFix && window.onChatAutoFix(vulnNum)}
+                        disabled={window.chatFixingFor === vulnNum || window.chatFixStatus?.[vulnNum] === 'success'}
+                        className={window.chatFixingFor === vulnNum ? "btn-fixing" : ""}
+                        style={{
+                          background: window.chatFixStatus?.[vulnNum] === 'success' ? "var(--status-ready)" : "var(--accent)",
+                          color: "#fff",
+                          border: "none",
+                          padding: "4px 10px",
+                          borderRadius: "4px",
+                          cursor: window.chatFixingFor === vulnNum || window.chatFixStatus?.[vulnNum] === 'success' ? "not-allowed" : "pointer",
+                          fontSize: "12px",
+                          margin: "0 4px",
+                          display: "inline-block"
+                        }}
+                      >
+                        {window.chatFixingFor === vulnNum ? "Fixing..." : window.chatFixStatus?.[vulnNum] === 'success' ? "✓ Fixed" : `Fix`}
+                      </button>
+                    );
+                  }
+                  return <ReactMarkdown key={i}>{part}</ReactMarkdown>;
+                });
+              })()}
             </div>
             {msg.sources && msg.sources.length > 0 && (
               <div className="source-chips">
@@ -35,12 +69,84 @@ export function ChatMessage({ msg }) {
   );
 }
 
-export default function ChatPanel({ project, onAsk, onViewReport, onDelete }) {
+export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRefresh, onAddMessage }) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef(null);
+  
+  useEffect(() => {
+    window.onRefreshProjects = onRefresh;
+  }, [onRefresh]);
+  
+  const [fixingAll, setFixingAll] = useState(false);
+  const [fixAllStatus, setFixAllStatus] = useState("");
+
+  const handleFixAll = async () => {
+    setFixingAll(true);
+    setFixAllStatus("Fetching vulnerabilities...");
+    try {
+      const data = await getVulnerabilities(project.id);
+      if (data && data.results) {
+        for (let i = 0; i < data.results.length; i++) {
+          setFixAllStatus(`Fixing ${i + 1} of ${data.results.length}...`);
+          const res = await autoFixVulnerability(project.id, data.results[i]);
+          if (res?.message && onAddMessage) {
+            onAddMessage(project.id, "assistant", `**✨ Fix Applied (${i + 1}/${data.results.length}):** ${res.message}`);
+          }
+        }
+        setFixAllStatus("✓ All fixed!");
+        if (onRefresh) onRefresh();
+      } else {
+        setFixAllStatus("No vulnerabilities to fix.");
+      }
+    } catch (err) {
+      setFixAllStatus("Error: " + err.message);
+    }
+    setFixingAll(false);
+  };
+
+  const [rescanning, setRescanning] = useState(false);
+  const handleRescan = async () => {
+    setRescanning(true);
+    try {
+      await rescanVulnerabilities(project.id);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      alert("Error rescanning: " + err.message);
+    }
+    setRescanning(false);
+  };
 
   const v = project.vulnerabilities;
   const hasVulns = v && (v.high > 0 || v.medium > 0 || v.low > 0);
+
+  const [chatFixingFor, setChatFixingFor] = useState(null);
+  const [chatFixStatus, setChatFixStatus] = useState({});
+
+  useEffect(() => {
+    window.chatFixingFor = chatFixingFor;
+    window.chatFixStatus = chatFixStatus;
+    window.onChatAutoFix = async (vulnNum) => {
+      setChatFixingFor(vulnNum);
+      setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'applying' }));
+      try {
+        const data = await getVulnerabilities(project.id);
+        const finding = data?.results?.[vulnNum - 1];
+        if (finding) {
+          const res = await autoFixVulnerability(project.id, finding);
+          setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'success' }));
+          if (res?.message && onAddMessage) {
+            onAddMessage(project.id, "assistant", `**✨ Fix Applied:** ${res.message}`);
+          }
+          if (window.onRefreshProjects) window.onRefreshProjects();
+        } else {
+          setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'Error: finding not found' }));
+        }
+      } catch (err) {
+        setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'Error: ' + err.message }));
+      }
+      setChatFixingFor(null);
+    };
+  }, [project.id, chatFixingFor, chatFixStatus]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -73,6 +179,22 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete }) {
                 onClick={() => onViewReport && onViewReport(project)}
               >
                 View Report
+              </span>
+              {hasVulns && (
+                <span 
+                  className="sec-badge" 
+                  style={{ marginLeft: "6px", borderStyle: "dashed", cursor: (fixingAll || fixAllStatus === "✓ All fixed!") ? "not-allowed" : "pointer", background: fixAllStatus === "✓ All fixed!" ? "var(--status-ready)" : "var(--accent)", color: "#fff" }}
+                  onClick={() => { if (!fixingAll && fixAllStatus !== "✓ All fixed!") handleFixAll(); }}
+                >
+                  {fixingAll ? fixAllStatus : fixAllStatus || "✨ Auto-Fix All"}
+                </span>
+              )}
+              <span 
+                className="sec-badge" 
+                style={{ marginLeft: "6px", borderStyle: "dashed", cursor: rescanning ? "not-allowed" : "pointer" }}
+                onClick={() => { if (!rescanning) handleRescan(); }}
+              >
+                {rescanning ? "Rescanning..." : "🔄 Recheck Report"}
               </span>
             </div>
           )}

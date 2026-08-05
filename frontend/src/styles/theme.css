@@ -344,3 +344,12 @@ body { margin: 0; padding: 0; }
   .chat-header-stats { display: none; }
   .empty-title { font-size: 24px; }
 }
+
+@keyframes pulse-fix { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.95); } 100% { opacity: 1; transform: scale(1); } }
+
+.btn-fixing {
+  animation: pulse-fix 1s infinite ease-in-out;
+  cursor: wait !important;
+  background: var(--status-ready) !important;
+  color: #fff !important;
+}
