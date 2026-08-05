@@ -173,6 +173,68 @@ def download_repo(project_id):
     return send_file(zip_path + ".zip", as_attachment=True, download_name=f"{project_id}_repo.zip")
 
 
+@app.post("/projects/<project_id>/push")
+def push_repo(project_id):
+    import os
+    import git
+    import uuid
+    from urllib.parse import urlparse, urlunparse, quote
+    
+    repo_path = os.path.join(config.REPORTS_DIR, "..", "repos", project_id)
+    if not os.path.exists(repo_path):
+        return jsonify({"error": "repo not found"}), 404
+        
+    data = request.json or {}
+    token = data.get("token", "").strip()
+    
+    try:
+        repo = git.Repo(repo_path)
+        
+        # Check if there are any changes to commit
+        if not repo.is_dirty() and not repo.untracked_files:
+            return jsonify({"error": "No security fixes have been applied yet. Nothing to push!"}), 400
+            
+        # Generate branch name
+        branch_name = f"security-fixes-{uuid.uuid4().hex[:6]}"
+        
+        # Create and checkout new branch
+        current = repo.create_head(branch_name)
+        current.checkout()
+        
+        # Add and commit all changes
+        repo.git.add(all=True)
+        repo.index.commit("Apply automated security fixes")
+        
+        # Handle authentication if token is provided
+        origin = repo.remotes.origin
+        original_url = list(origin.urls)[0]
+        
+        if token:
+            parsed = urlparse(original_url)
+            encoded_token = quote(token, safe="")
+            # Replace auth in URL
+            authed = parsed._replace(netloc=f"x-access-token:{encoded_token}@{parsed.hostname}")
+            authed_url = urlunparse(authed)
+            origin.set_url(authed_url)
+            
+        try:
+            # Push the branch
+            origin.push(branch_name)
+        finally:
+            # Always restore original URL so the token isn't saved permanently
+            if token:
+                origin.set_url(original_url)
+                
+        return jsonify({"ok": True, "branch": branch_name, "message": f"Successfully pushed to branch '{branch_name}' on GitHub!"})
+        
+    except git.exc.GitCommandError as e:
+        if "Authentication failed" in str(e) or "403" in str(e) or "401" in str(e):
+            return jsonify({"error": "Authentication failed. The repository is either private or requires a GitHub Personal Access Token (PAT) to push. Please provide a valid PAT."}), 401
+        return jsonify({"error": f"Git error: {str(e)}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.get("/projects/<project_id>/download/report")
 def download_report(project_id):
     import os

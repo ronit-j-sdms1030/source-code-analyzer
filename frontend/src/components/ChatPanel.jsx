@@ -246,6 +246,34 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
           <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', alignItems: 'center', marginLeft: '12px' }}>
             <button
               className="action-btn"
+              title="Push Fixes to a new GitHub Branch"
+              onClick={async () => {
+                let token = "";
+                if (window.confirm("Do you want to provide a GitHub Personal Access Token (PAT) to authenticate this push? (Required for private repos or public repos without write access)")) {
+                  token = window.prompt("Enter your GitHub PAT (it will not be stored permanently):") || "";
+                }
+                
+                try {
+                  const res = await fetch(`http://127.0.0.1:5000/projects/${project.id}/push`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    window.alert("Failed to push: " + (data.error || "Unknown error"));
+                  } else {
+                    window.alert(data.message);
+                  }
+                } catch (e) {
+                  window.alert("Network error: " + e.message);
+                }
+              }}
+            >
+              <Icon.Github />
+            </button>
+            <button
+              className="action-btn"
               title="Download Code Repository (.zip)"
               onClick={() => window.open(`http://127.0.0.1:5000/projects/${project.id}/download/repo`)}
             >
