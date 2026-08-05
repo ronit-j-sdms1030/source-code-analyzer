@@ -92,10 +92,38 @@ def _build_prompt(question: str, chunks: list, history: list, file_tree: str = "
     return messages
 
 
+def _rewrite_query(history: list, question: str) -> str:
+    if not history:
+        return question
+    
+    prompt = """\
+Given the following conversation history and the user's latest question, rewrite the question so that it is a standalone query capable of being used for a semantic search over a codebase.
+Do not answer the question. Only output the rewritten search query. If the question is already standalone, just output the original question.
+"""
+    messages = [{"role": "system", "content": prompt}]
+    for h in history[-4:]:
+        role = "user" if h["role"] == "user" else "assistant"
+        # truncate long assistant responses to save context/latency
+        text = h["text"]
+        if len(text) > 500:
+            text = text[:500] + "..."
+        messages.append({"role": role, "content": text})
+        
+    messages.append({"role": "user", "content": question})
+    
+    rewritten = _call_cloud_llm(messages).strip()
+    if rewritten.startswith('"') and rewritten.endswith('"'):
+        rewritten = rewritten[1:-1]
+    return rewritten
+
+
 def answer_question(project_id: str, question: str) -> dict:
     from .vectorstore import get_project_meta
     
-    query_vector = embed_query(question)
+    history = _history.setdefault(project_id, [])
+    search_query = _rewrite_query(history, question)
+    
+    query_vector = embed_query(search_query)
     results = query_chunks(project_id, query_vector, top_k=5)
 
     documents = (results.get("documents") or [[]])[0]
@@ -108,7 +136,6 @@ def answer_question(project_id: str, question: str) -> dict:
 
     vuln_summary = _get_vulnerability_summary(project_id)
 
-    history = _history.setdefault(project_id, [])
     messages = _build_prompt(question, chunks, history, file_tree, vuln_summary)
 
     answer = _call_cloud_llm(messages)
