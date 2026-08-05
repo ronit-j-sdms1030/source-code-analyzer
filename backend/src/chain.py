@@ -277,4 +277,21 @@ Rules:
     with open(full_path, "w", encoding="utf-8") as f:
         f.write(fixed_content)
         
-    return {"status": "success", "file": file_path, "message": description}
+    import difflib
+    diff = list(difflib.unified_diff(
+        file_content.splitlines(keepends=True),
+        fixed_content.splitlines(keepends=True),
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}"
+    ))
+    diff_text = "".join(diff)
+    
+    # Strip any dangling trailing prompts from the description
+    description = description.replace("Fixed File Content:", "").strip()
+    
+    if diff_text:
+        final_message = f"{description}\n\n**Changes in `{file_path}`:**\n```diff\n{diff_text}\n```"
+    else:
+        final_message = description
+        
+    return {"status": "success", "file": file_path, "message": final_message}
