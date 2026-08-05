@@ -255,13 +255,22 @@ def apply_auto_fix(project_id: str, finding: dict) -> dict:
     system_prompt = """\
 You are an expert Security Engineer and software developer.
 You will be provided with the full content of a source code file that contains a security vulnerability.
-Your task is to fix the vulnerability and return the *entire* corrected file content.
+Your task is to fix the vulnerability by providing a SEARCH/REPLACE block.
 
 Rules:
 1. First, write a brief 1-3 sentence description of exactly how you fixed the vulnerability.
-2. Then, output the fixed file content.
-3. You MUST wrap the file content in a single standard markdown code block (e.g. ```javascript ... ``` or ```python ... ```).
-4. Do NOT truncate the file; return the full file with the fix applied.
+2. Then, provide a SEARCH/REPLACE block that replaces the vulnerable code with the fixed code.
+3. The SEARCH block MUST be an EXACT, character-for-character match of the original code, including whitespace and indentation.
+
+Format your response EXACTLY like this:
+
+Brief description of the fix.
+
+<<<<
+[exact original code to replace]
+====
+[new fixed code]
+>>>>
 """
     
     user_content = (
@@ -278,18 +287,30 @@ Rules:
     response = _call_cloud_llm(messages)
     
     # Extract the description and the code block from the response
-    description = "Fixed the vulnerability."
-    parts = response.split("```")
-    if len(parts) >= 3:
-        description = parts[0].strip() or "Fixed the vulnerability."
-        lines = parts[1].split("\n")
-        if lines and not lines[0].strip().startswith(("import", "def", "class", "/", "*")):
-            # It might be the language identifier like `javascript`
-            lines = lines[1:]
-        fixed_content = "\n".join(lines).strip()
+    if "<<<<" in response and "====" in response and ">>>>" in response:
+        description = response.split("<<<<")[0].strip()
+        search_block = response.split("<<<<")[1].split("====")[0].strip("\n")
+        replace_block = response.split("====")[1].split(">>>>")[0].strip("\n")
+        
+        if search_block in file_content:
+            fixed_content = file_content.replace(search_block, replace_block)
+        else:
+            # Fallback if exact match fails
+            fixed_content = file_content
+            description += "\n\n(Warning: Autofix failed to apply because the search block did not exactly match the file)."
     else:
-        # Fallback if LLM didn't use code blocks
-        fixed_content = response
+        # Fallback to old behavior if LLM didn't use the block
+        parts = response.split("```")
+        if len(parts) >= 3:
+            description = parts[0].strip() or "Fixed the vulnerability."
+            lines = parts[1].split("\n")
+            if lines and not lines[0].strip().startswith(("import", "def", "class", "/", "*")):
+                # It might be the language identifier like `javascript`
+                lines = lines[1:]
+            fixed_content = "\n".join(lines).strip()
+        else:
+            description = "Fixed the vulnerability."
+            fixed_content = response
         
     # Write the fixed content back to disk
     with open(full_path, "w", encoding="utf-8") as f:
