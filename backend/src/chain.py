@@ -4,9 +4,26 @@ from . import config
 from .embeddings import embed_query
 from .vectorstore import query_chunks
 
-# Very small in-memory chat history per project, keyed by project_id.
-# A production build would persist this alongside project metadata.
-_history = {}
+def _get_history(project_id: str) -> list:
+    import json
+    import os
+    path = os.path.join(config.REPORTS_DIR, f"{project_id}_history.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return []
+
+def _append_history(project_id: str, message: dict):
+    import json
+    import os
+    history = _get_history(project_id)
+    history.append(message)
+    path = os.path.join(config.REPORTS_DIR, f"{project_id}_history.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2)
 
 SYSTEM_PROMPT = """\
 You are an expert software engineer and code reviewer. \
@@ -121,7 +138,7 @@ Do not answer the question. Only output the rewritten search query. If the quest
 def answer_question(project_id: str, question: str) -> dict:
     from .vectorstore import get_project_meta
     
-    history = _history.setdefault(project_id, [])
+    history = _get_history(project_id)
     search_query = _rewrite_query(history, question)
     
     query_vector = embed_query(search_query)
@@ -141,8 +158,8 @@ def answer_question(project_id: str, question: str) -> dict:
 
     answer = _call_cloud_llm(messages)
 
-    history.append({"role": "user", "text": question})
-    history.append({"role": "assistant", "text": answer})
+    _append_history(project_id, {"role": "user", "text": question})
+    _append_history(project_id, {"role": "assistant", "text": answer})
 
     sources = sorted({c["file_path"] for c in chunks})
     return {"answer": answer, "sources": sources}

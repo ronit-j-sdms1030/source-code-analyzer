@@ -134,10 +134,9 @@ def auto_fix_vulnerability(project_id):
                             upsert_project_meta(project_id, {**_projects[project_id]})
                             
                     # Inject the fix into the chat history so the LLM remembers!
-                    from src.chain import _history
-                    history = _history.setdefault(project_id, [])
+                    from src.chain import _append_history
                     msg = f"**✨ Fix Applied:** Fixed {finding.get('path', 'unknown file')} ({finding.get('extra', {}).get('message', '')}).\nDetails: {result.get('message', '')}"
-                    history.append({"role": "assistant", "text": msg})
+                    _append_history(project_id, {"role": "assistant", "text": msg})
 
         return jsonify(result)
     except Exception as e:
