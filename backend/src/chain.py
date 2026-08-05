@@ -27,6 +27,7 @@ Rules:
 """
 def _get_vulnerability_summary(project_id: str) -> str:
     import json
+    import os
     report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
     if not os.path.exists(report_path):
         return "No vulnerability report available."
@@ -54,7 +55,6 @@ def _get_vulnerability_summary(project_id: str) -> str:
             if len(parts) > 1:
                 path = parts[-1]
             else:
-                import os
                 path = os.path.basename(path)
                 
             line = r.get("start", {}).get("line", "?")
