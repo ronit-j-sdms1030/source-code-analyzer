@@ -35,13 +35,18 @@ export function ChatMessage({ msg }) {
   );
 }
 
-export default function ChatPanel({ project, onAsk }) {
+export default function ChatPanel({ project, onAsk, onViewReport }) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef(null);
 
+  const v = project.vulnerabilities;
+  const hasVulns = v && (v.high > 0 || v.medium > 0 || v.low > 0);
+
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [project.messages.length]);
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [project.messages]);
 
   const submit = (e) => {
     e.preventDefault();
@@ -56,6 +61,21 @@ export default function ChatPanel({ project, onAsk }) {
         <div>
           <div className="chat-header-name">{project.name}</div>
           <div className="chat-header-sub">{project.url.replace("https://", "")}</div>
+          {v && (
+            <div className="security-badges" style={{ marginTop: "12px" }}>
+              {v.high > 0 && <span className="sec-badge high">🔴 {v.high} High</span>}
+              {v.medium > 0 && <span className="sec-badge medium">🟡 {v.medium} Med</span>}
+              {v.low > 0 && <span className="sec-badge low">🔵 {v.low} Low</span>}
+              {!hasVulns && <span className="sec-badge clean">✅ Secure</span>}
+              <span 
+                className="sec-badge" 
+                style={{ marginLeft: "6px", borderStyle: "dashed", cursor: "pointer" }}
+                onClick={() => onViewReport && onViewReport(project)}
+              >
+                View Report
+              </span>
+            </div>
+          )}
         </div>
         <div className="chat-header-stats">
           <div className="stat">

@@ -73,21 +73,6 @@ export default function ProjectCard({ project, active, onSelect, onDelete, onVie
             <span className="meta-sep">·</span>
             <span>{project.indexedAt}</span>
           </div>
-          {v && (
-            <div className="security-badges">
-              {v.high > 0 && <span className="sec-badge high">🔴 {v.high} High</span>}
-              {v.medium > 0 && <span className="sec-badge medium">🟡 {v.medium} Med</span>}
-              {v.low > 0 && <span className="sec-badge low">🔵 {v.low} Low</span>}
-              {!hasVulns && <span className="sec-badge clean">✅ Secure</span>}
-              <span 
-                className="sec-badge" 
-                style={{ marginLeft: "auto", borderStyle: "dashed" }}
-                onClick={(e) => { e.stopPropagation(); onViewReport(project); }}
-              >
-                View Report
-              </span>
-            </div>
-          )}
         </>
       ) : project.status === "error" ? (
         <div className="project-card-error">

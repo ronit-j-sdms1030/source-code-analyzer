@@ -196,7 +196,7 @@ export default function SourceCodeAnalyzer() {
               </p>
             </div>
           )}
-          {selected && selected.status === "ready" && <ChatPanel project={selected} onAsk={askQuestion} />}
+          {selected && selected.status === "ready" && <ChatPanel project={selected} onAsk={askQuestion} onViewReport={setReportProject} />}
         </main>
       </div>
 
