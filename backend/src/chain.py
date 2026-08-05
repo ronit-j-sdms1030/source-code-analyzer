@@ -301,7 +301,7 @@ Brief description of the fix.
         else:
             # Fallback if exact match fails
             fixed_content = file_content
-            description += "\n\n(Warning: Autofix failed to apply because the search block did not exactly match the file)."
+            description += f"\n\n**(Warning: Autofix failed to apply because the search block did not exactly match the file).**\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n```\n{replace_block}\n```"
     else:
         # Fallback to old behavior if LLM didn't use the SEARCH/REPLACE block
         parts = response.split("```")
@@ -313,7 +313,7 @@ Brief description of the fix.
                 lines = lines[1:]
             fixed_content = "\n".join(lines).strip()
         else:
-            description = "Autofix failed: The AI did not output a valid SEARCH/REPLACE block or code block format."
+            description = f"**Autofix failed:** The AI did not output a valid SEARCH/REPLACE format.\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n{response}"
             fixed_content = file_content
         
     # Write the fixed content back to disk
