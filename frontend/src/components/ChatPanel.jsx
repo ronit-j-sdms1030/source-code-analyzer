@@ -248,6 +248,9 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
               className="action-btn"
               title="Push Fixes to a new GitHub Branch"
               onClick={async () => {
+                const branch = window.prompt("Enter a name for the new branch:", "security-fixes") || "security-fixes";
+                const commitMessage = window.prompt("Enter a commit message:", "Apply automated security fixes") || "Apply automated security fixes";
+                
                 let token = "";
                 if (window.confirm("Do you want to provide a GitHub Personal Access Token (PAT) to authenticate this push? (Required for private repos or public repos without write access)")) {
                   token = window.prompt("Enter your GitHub PAT (it will not be stored permanently):") || "";
@@ -257,7 +260,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
                   const res = await fetch(`http://127.0.0.1:5000/projects/${project.id}/push`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token })
+                    body: JSON.stringify({ token, branch, commit_message: commitMessage })
                   });
                   const data = await res.json();
                   if (!res.ok) {

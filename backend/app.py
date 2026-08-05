@@ -186,6 +186,8 @@ def push_repo(project_id):
         
     data = request.json or {}
     token = data.get("token", "").strip()
+    branch_name = data.get("branch", "").strip() or f"security-fixes-{uuid.uuid4().hex[:6]}"
+    commit_message = data.get("commit_message", "").strip() or "Apply automated security fixes"
     
     try:
         repo = git.Repo(repo_path)
@@ -194,16 +196,13 @@ def push_repo(project_id):
         if not repo.is_dirty() and not repo.untracked_files:
             return jsonify({"error": "No security fixes have been applied yet. Nothing to push!"}), 400
             
-        # Generate branch name
-        branch_name = f"security-fixes-{uuid.uuid4().hex[:6]}"
-        
         # Create and checkout new branch
         current = repo.create_head(branch_name)
         current.checkout()
         
         # Add and commit all changes
         repo.git.add(all=True)
-        repo.index.commit("Apply automated security fixes")
+        repo.index.commit(commit_message)
         
         # Handle authentication if token is provided
         origin = repo.remotes.origin
