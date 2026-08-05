@@ -129,7 +129,9 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
           setFixAllStatus(`Fixing ${i + 1} of ${data.results.length}...`);
           const res = await autoFixVulnerability(project.id, data.results[i]);
           if (res?.message && onAddMessage) {
-            onAddMessage(project.id, "assistant", `**✨ Fix Applied (${i + 1}/${data.results.length}):** ${res.message}`);
+            const isFailure = res.message.includes("Autofix failed");
+            const prefix = isFailure ? `**⚠️ Fix Attempt Failed (${i + 1}/${data.results.length}):**` : `**✨ Fix Applied (${i + 1}/${data.results.length}):**`;
+            onAddMessage(project.id, "assistant", `${prefix} ${res.message}`);
           }
         }
         setFixAllStatus("✓ All fixed!");
