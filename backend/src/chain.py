@@ -42,6 +42,7 @@ Rules:
 - ALWAYS rely on the `Vulnerability Report` section provided in this system prompt for the current state of vulnerabilities. Do NOT rely on older lists you may have generated in the chat history, as they become outdated when the user fixes vulnerabilities.
 - CRITICAL: If the user explicitly asks to fix a specific vulnerability, output the `[ACTION:FIX:<N>]` token (where `<N>` is the GLOBAL index number exactly as it appears in the Vulnerability Report). Even if you renumbered the list to start from 1, `<N>` MUST be the original global index.
 - If the user asks to fix MULTIPLE vulnerabilities or says something like 'I want to fix them', you must propose fixing them one by one in order. Ask them to confirm fixing the FIRST one in the list, and output the `[ACTION:FIX:<N>]` token for ONLY that first vulnerability. Do not provide fix instructions or buttons for the others until the first one is resolved.
+- If the user asks which vulnerabilities were just fixed, DO NOT look at the current Vulnerability Report (which might be clean). Instead, look at the chat history for recent 'Fix Applied' messages and summarize them.
 """
 def _get_vulnerability_summary(project_id: str) -> str:
     import json
