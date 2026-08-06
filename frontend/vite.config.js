@@ -12,6 +12,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      "/api": "http://localhost:5000",
       "/ingest": "http://localhost:5000",
       "/chat": "http://localhost:5000",
       "/projects": "http://localhost:5000",

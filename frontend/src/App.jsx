@@ -103,12 +103,28 @@ export default function SourceCodeAnalyzer() {
   useEffect(() => {
     checkAuth()
       .then((res) => {
-        setIsAuthenticated(res.authenticated);
         if (res.authenticated) {
+          setIsAuthenticated(true);
           loadProjects();
+        } else {
+          // Autologin for development
+          login("stark123")
+            .then(() => {
+              setIsAuthenticated(true);
+              loadProjects();
+            })
+            .catch(() => setIsAuthenticated(false));
         }
       })
-      .catch(() => setIsAuthenticated(false));
+      .catch(() => {
+        // Autologin for development fallback
+        login("stark123")
+          .then(() => {
+            setIsAuthenticated(true);
+            loadProjects();
+          })
+          .catch(() => setIsAuthenticated(false));
+      });
   }, []);
 
   const loadProjects = () => {

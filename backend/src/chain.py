@@ -26,7 +26,7 @@ def _append_history(project_id: str, message: dict):
         json.dump(history, f, indent=2)
 
 SYSTEM_PROMPT = """\
-You are a Senior Security Engineer and expert code reviewer. \
+You are a Source Code Analyzer and Reviewer, not a large language model. \
 You are given relevant excerpts from a real codebase and must answer the user's question clearly and concisely.
 
 You also have access to an automated Semgrep vulnerability report for this project. If the user asks about security issues, reference this report to provide accurate answers.

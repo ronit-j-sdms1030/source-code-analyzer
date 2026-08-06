@@ -116,34 +116,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
     window.onRefreshProjects = onRefresh;
   }, [onRefresh]);
   
-  const [fixingAll, setFixingAll] = useState(false);
-  const [fixAllStatus, setFixAllStatus] = useState("");
 
-  const handleFixAll = async () => {
-    setFixingAll(true);
-    setFixAllStatus("Fetching vulnerabilities...");
-    try {
-      const data = await getVulnerabilities(project.id);
-      if (data && data.results) {
-        for (let i = 0; i < data.results.length; i++) {
-          setFixAllStatus(`Fixing ${i + 1} of ${data.results.length}...`);
-          const res = await autoFixVulnerability(project.id, data.results[i]);
-          if (res?.message && onAddMessage) {
-            const isFailure = res.message.includes("Autofix failed");
-            const prefix = isFailure ? `**⚠️ Fix Attempt Failed (${i + 1}/${data.results.length}):**` : `**✨ Fix Applied (${i + 1}/${data.results.length}):**`;
-            onAddMessage(project.id, "assistant", `${prefix} ${res.message}`);
-          }
-        }
-        setFixAllStatus("✓ All fixed!");
-        if (onRefresh) onRefresh();
-      } else {
-        setFixAllStatus("No vulnerabilities to fix.");
-      }
-    } catch (err) {
-      setFixAllStatus("Error: " + err.message);
-    }
-    setFixingAll(false);
-  };
 
   const [rescanning, setRescanning] = useState(false);
   const handleRescan = async () => {
@@ -221,15 +194,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
               >
                 View Report
               </span>
-              {hasVulns && (
-                <span 
-                  className="sec-badge" 
-                  style={{ marginLeft: "6px", borderStyle: "dashed", cursor: (fixingAll || fixAllStatus === "✓ All fixed!") ? "not-allowed" : "pointer", background: fixAllStatus === "✓ All fixed!" ? "var(--status-ready)" : "var(--accent)", color: "#fff" }}
-                  onClick={() => { if (!fixingAll && fixAllStatus !== "✓ All fixed!") handleFixAll(); }}
-                >
-                  {fixingAll ? fixAllStatus : fixAllStatus || "✨ Auto-Fix All"}
-                </span>
-              )}
+
               <span 
                 className="sec-badge" 
                 style={{ marginLeft: "6px", borderStyle: "dashed", cursor: rescanning ? "not-allowed" : "pointer" }}

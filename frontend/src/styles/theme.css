@@ -297,8 +297,8 @@ body { margin: 0; padding: 0; }
 .send-btn-round:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ---- vulnerability modal ---- */
-.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 24px; box-sizing: border-box; }
-.modal-content { background: var(--bg-panel); border: 1px solid var(--border-hair); border-radius: 12px; width: 100%; max-width: 800px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 0; box-sizing: border-box; }
+.modal-content { background: var(--bg-panel); border: none; border-radius: 0; width: 100vw; height: 100vh; max-width: none; max-height: none; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--border-hair); }
 .modal-title { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 18px; font-weight: 700; margin: 0; }
 .modal-subtitle { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text-tertiary); margin: 4px 0 0; }
