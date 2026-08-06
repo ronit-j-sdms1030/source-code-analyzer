@@ -88,12 +88,37 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
         if os.path.exists(report_path):
             with open(report_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                
+            file_cache = {}
             for finding in data.get("results", []):
                 # Convert absolute path to relative path
                 path = finding.get("path", "")
                 if path and path.startswith(repo_path):
                     finding["path"] = os.path.relpath(path, repo_path)
+                    
+                # Manually extract snippet to bypass Semgrep redaction
+                try:
+                    rel_path = finding.get("path", "")
+                    abs_path = os.path.join(repo_path, rel_path)
+                    
+                    if abs_path not in file_cache:
+                        with open(abs_path, 'r', encoding='utf-8') as src_file:
+                            file_cache[abs_path] = src_file.read().splitlines()
+                            
+                    lines = file_cache[abs_path]
+                    start_line = finding.get("start", {}).get("line", 1) - 1
+                    end_line = finding.get("end", {}).get("line", start_line + 1)
+                    
+                    if "extra" not in finding:
+                        finding["extra"] = {}
+                        
+                    if start_line >= 0 and end_line <= len(lines) and start_line < end_line:
+                        finding["extra"]["lines"] = "\n".join(lines[start_line:end_line])
+                    else:
+                        finding["extra"]["lines"] = "[UNABLE TO EXTRACT VALUE]"
+                except Exception:
+                    if "extra" not in finding:
+                        finding["extra"] = {}
+                    finding["extra"]["lines"] = "[UNABLE TO EXTRACT VALUE]"
                     
                 sev = finding.get("extra", {}).get("severity", "").lower()
                 if sev == "error" or sev == "high":
