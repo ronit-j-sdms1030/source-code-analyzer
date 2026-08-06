@@ -1345,7 +1345,7 @@ Format your response EXACTLY like this:
             lines = lines[1:]
         fixed_content = "\n".join(lines).strip()
         
-        if len(fixed_content) < len(file_content) * 0.2:
+        if len(fixed_content) < len(base_file_content) * 0.2:
             return {
                 "error": "The AI output a partial snippet instead of the full file.",
                 "risk_assessment": risk_assessment
