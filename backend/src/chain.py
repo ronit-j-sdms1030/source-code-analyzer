@@ -178,7 +178,7 @@ def _call_cloud_llm(messages: list, model_name: str = None) -> str:
     payload = {
         "model": model_name or config.CLOUD_MODEL,
         "messages": messages,
-        "temperature": 0.2,
+        "temperature": 0.0,
     }
 
     resp = requests.post(
@@ -235,6 +235,32 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
     message = finding.get("extra", {}).get("message", "No message provided")
     severity = finding.get("extra", {}).get("severity", "Unknown")
     code_snippet = finding.get("extra", {}).get("lines", "")
+
+    import re
+    # Extract the value from the code snippet if it looks like an assignment
+    value = code_snippet
+    m = re.search(r'=\s*["\']([^"\']+)["\']', code_snippet)
+    if m:
+        value = m.group(1)
+
+    is_dummy = False
+    dummy_reason = ""
+    
+    if len(value) >= 8 and (value[:len(value)//2] == value[len(value)//2:]):
+        is_dummy = True
+        dummy_reason = f"The value `{value}` consists of a repeated substring, which is a common placeholder convention, not a cryptographically random key."
+    elif re.search(r'^(1234|abcd|0123|qwerty|asdf)', value.lower()):
+        is_dummy = True
+        dummy_reason = f"The value `{value}` follows a simple sequential or keyboard pattern, which is a common placeholder convention."
+    elif any(x in value.lower() for x in ['insert_', 'your_', '<>', 'xxxxxx', 'changeme', 'placeholder']):
+        is_dummy = True
+        dummy_reason = f"The value `{value}` contains explicit placeholder text."
+    elif len(set(value)) <= 3 and len(value) > 5:
+        is_dummy = True
+        dummy_reason = f"The value `{value}` has extremely low entropy (only {len(set(value))} unique characters), which is uncharacteristic of a real secret."
+
+    if is_dummy:
+        return f"**FALSE POSITIVE**\nThe detected snippet `{code_snippet.strip()}` is clearly a dummy placeholder and not a real hardcoded credential. {dummy_reason} No actual sensitive data is exposed."
 
     user_content = (
         f"Please generate a detailed vulnerability report for the following finding:\n\n"
