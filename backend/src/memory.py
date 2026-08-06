@@ -153,3 +153,79 @@ def save_graph(project_id: str, graph: dict):
         path = _graph_file_path(project_id)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(graph, f, indent=2)
+
+# ── Code Quality Metrics API ──────────────────────────────────────────────────
+
+def _quality_file_path(project_id: str) -> str:
+    import os
+    from . import config
+    return os.path.join(config.REPORTS_DIR, f"{project_id}_quality.json")
+
+def get_quality_metrics(project_id: str) -> dict:
+    """Returns the code quality metrics for a project."""
+    import json
+    if _check_redis():
+        key = f"quality:{project_id}"
+        raw = _redis_client.get(key)
+        if not raw:
+            return {}
+        return json.loads(raw)
+    else:
+        import os
+        path = _quality_file_path(project_id)
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+def save_quality_metrics(project_id: str, metrics: dict):
+    """Saves the code quality metrics for a project."""
+    import json
+    if _check_redis():
+        key = f"quality:{project_id}"
+        _redis_client.set(key, json.dumps(metrics))
+    else:
+        path = _quality_file_path(project_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2)
+
+# ── SonarQube Credentials API ─────────────────────────────────────────────────
+
+def _sonar_creds_file_path() -> str:
+    import os
+    from . import config
+    return os.path.join(config.REPORTS_DIR, "sonar_credentials.json")
+
+def get_sonar_credentials() -> dict:
+    """Returns the globally stored SonarQube credentials (password, token)."""
+    import json
+    if _check_redis():
+        raw = _redis_client.get("sonar_credentials")
+        if not raw:
+            return {}
+        return json.loads(raw)
+    else:
+        import os
+        path = _sonar_creds_file_path()
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+def save_sonar_credentials(creds: dict):
+    """Saves the SonarQube credentials."""
+    import json
+    if _check_redis():
+        _redis_client.set("sonar_credentials", json.dumps(creds))
+    else:
+        import os
+        path = _sonar_creds_file_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(creds, f, indent=2)

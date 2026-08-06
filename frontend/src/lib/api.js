@@ -147,3 +147,40 @@ export function getFileContent(projectId, finding) {
   return request(`/projects/${projectId}/file_content?${params}`);
 }
 
+export function startQualityScan(id) {
+  return request(`/projects/${id}/quality-scan`, { method: "POST" });
+}
+
+export function getQualityScanStatus(id) {
+  return request(`/projects/${id}/quality-scan/status`);
+}
+
+/**
+ * Polls /projects/:id/quality-scan/status until status is "complete" or "error".
+ */
+export function pollQualityScanStatus(id, onUpdate, { intervalMs = 2000 } = {}) {
+  let cancelled = false;
+
+  const tick = async () => {
+    if (cancelled) return;
+    try {
+      const status = await getQualityScanStatus(id);
+      onUpdate(status);
+      if (status.status === "complete" || status.status === "error") return;
+    } catch (err) {
+      // 404 means not started yet
+      if (String(err).includes("404")) {
+        onUpdate({ status: "not_started" });
+      } else {
+        onUpdate({ status: "error", error: String(err) });
+        return;
+      }
+    }
+    if (!cancelled) setTimeout(tick, intervalMs);
+  };
+
+  tick();
+  return () => {
+    cancelled = true;
+  };
+}

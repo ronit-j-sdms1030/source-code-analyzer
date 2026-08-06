@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import Icon from "./icons";
-import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities, applyEvaluatedFix } from "../lib/api";
+import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities, applyEvaluatedFix, getQualityScanStatus, startQualityScan, pollQualityScanStatus } from "../lib/api";
 import { MODEL_NAME } from "../lib/api";
 
 const CodeBlock = ({ node, inline, className, children, ...props }) => {
@@ -115,6 +115,48 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
   const [draft, setDraft] = useState("");
   const scrollRef = useRef(null);
   
+  const [qualityMetrics, setQualityMetrics] = useState(null);
+  const cancelPoll = useRef(null);
+
+  const fetchQuality = async () => {
+    try {
+      const res = await getQualityScanStatus(project.id);
+      setQualityMetrics(res);
+      if (res.status === "running") {
+        pollQuality(project.id);
+      }
+    } catch (err) {
+      if (String(err).includes("404")) {
+        setQualityMetrics({ status: "not_started" });
+      }
+    }
+  };
+
+  const pollQuality = (id) => {
+    if (cancelPoll.current) cancelPoll.current();
+    cancelPoll.current = pollQualityScanStatus(id, (metrics) => {
+      setQualityMetrics(metrics);
+    });
+  };
+
+  useEffect(() => {
+    fetchQuality();
+    return () => {
+      if (cancelPoll.current) cancelPoll.current();
+    };
+  }, [project.id]);
+
+  const handleRunQualityScan = async () => {
+    try {
+      setQualityMetrics({ status: "running", stage: "Queued" });
+      await startQualityScan(project.id);
+      pollQuality(project.id);
+    } catch (err) {
+      alert("Error starting quality scan: " + err.message);
+      setQualityMetrics({ status: "error", error: err.message });
+    }
+  };
+
   useEffect(() => {
     window.onRefreshProjects = onRefresh;
   }, [onRefresh]);
@@ -190,6 +232,54 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
               </span>
             </div>
           )}
+          
+          <div className="quality-panel" style={{ marginTop: "16px", padding: "12px", background: "var(--bg-panel-raised)", borderRadius: "8px", border: "1px solid var(--border-hair)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Code Quality (SonarQube)
+              </div>
+              <button
+                className="action-btn"
+                style={{ fontSize: "11px", padding: "4px 8px" }}
+                disabled={qualityMetrics?.status === "running"}
+                onClick={handleRunQualityScan}
+              >
+                {qualityMetrics?.status === "running" ? "Scanning..." : "Run Quality Scan"}
+              </button>
+            </div>
+            
+            <div style={{ marginTop: "12px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+              {qualityMetrics?.status === "complete" ? (
+                <>
+                  <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
+                    ✨ Maintainability: {qualityMetrics.sqale_rating ? ["A", "B", "C", "D", "E"][Math.floor(parseFloat(qualityMetrics.sqale_rating)) - 1] || qualityMetrics.sqale_rating : "N/A"}
+                  </span>
+                  <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
+                    🐛 Code Smells: {qualityMetrics.code_smells || 0}
+                  </span>
+                  <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
+                    👯 Duplication: {qualityMetrics.duplicated_lines_density || 0}%
+                  </span>
+                  <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
+                    🧠 Complexity: {qualityMetrics.complexity || 0}
+                  </span>
+                </>
+              ) : qualityMetrics?.status === "running" ? (
+                <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+                  <span className="thinking"><span className="dot" /><span className="dot" /><span className="dot" /></span>
+                  {qualityMetrics.stage || "Analyzing..."}
+                </div>
+              ) : qualityMetrics?.status === "error" ? (
+                <div style={{ color: "var(--status-error)", fontSize: "13px" }}>
+                  ⚠ {qualityMetrics.error}
+                </div>
+              ) : (
+                <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+                  Not scanned yet.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
         <div className="chat-header-stats">
           <div className="stat">

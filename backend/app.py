@@ -75,6 +75,24 @@ def ingest_status(project_id):
     return jsonify(status)
 
 
+@app.post("/projects/<project_id>/quality-scan")
+@auth_required
+def trigger_quality_scan(project_id):
+    from src.sonarqube import start_quality_scan
+    start_quality_scan(project_id)
+    return jsonify({"status": "queued"})
+
+
+@app.get("/projects/<project_id>/quality-scan/status")
+@auth_required
+def get_quality_scan_status(project_id):
+    from src.memory import get_quality_metrics
+    metrics = get_quality_metrics(project_id)
+    if not metrics:
+        return jsonify({"status": "not_started"}), 404
+    return jsonify(metrics)
+
+
 @app.post("/chat")
 @auth_required
 def chat():
