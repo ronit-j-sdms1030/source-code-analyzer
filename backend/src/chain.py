@@ -200,13 +200,21 @@ You are writing a professional vulnerability report for a maintainer based on a 
 IMPORTANT: When you detect exposed secrets or hardcoded passwords, you MUST explicitly classify them (e.g., AWS Access Keys, GitHub Tokens, Database Passwords, etc.) and highlight their specific blast radius.
 
 CRITICAL CLASSIFICATION RULES:
-1. VERIFY FIRST & SHOW EVIDENCE: Do not assume Semgrep is correct. Read the code snippet. If it is a dummy value, placeholder, or just misparsed (like the phrase `requires login`), state clearly that this is a FALSE POSITIVE and explain why. If it is a real secret, you MUST quote the exact (redacted) variable name (e.g., `API_KEY=...`) to prove it is a live secret.
+0. FALSE POSITIVE CHECK: If the snippet contains 'INSERT_', 'YOUR_', '<>', 'xxxxxx', 'changeme', or is an empty string, it is a FALSE POSITIVE. You MUST NOT generate a vulnerability report. You MUST ONLY output the phrase `**FALSE POSITIVE**` followed by a one-sentence explanation.
+1. VERIFY FIRST & SHOW EVIDENCE: Do not assume Semgrep is correct. Read the code snippet. If it is a real secret, you MUST quote the exact (redacted) variable name (e.g., `API_KEY=...`) to prove it is a live secret.
 2. CWE ID: Pick the MOST SPECIFIC match based on actual code behavior (e.g., do not confuse CWE-798 Hardcoded Credentials with CWE-200 Sensitive Data Exposure).
-3. CVSS 3.1 & MATH: Calculate the exact CVSS 3.1 vector string by walking through AV, AC, PR, UI, S, C, I, A. Your numerical score MUST logically and mathematically match the vector. For example, if PR:H (High Privileges Required), you cannot score a 10.0. Ensure your impact logically matches the privileges required.
+3. CVSS 3.1 & MATH: Calculate the exact CVSS 3.1 vector string by walking through AV, AC, PR, UI, S, C, I, A. Ensure you use the exact keys, for example Scope is `S:C` or `S:U` (NOT `SC:C`). Your numerical score MUST logically and mathematically match the vector. For example, if PR:H (High Privileges Required), you cannot score a 10.0. Ensure your impact logically matches the privileges required.
 4. ENVIRONMENT CONTEXT: You must heavily weigh the environment based on the file path. A secret in a `.env.dev` or `.test` file has significantly lower severity than production code. Consider whether the file is tracked in git or just local.
 5. CONCRETE PoC: Your Proof of Concept must not be generic bullet points. Show actual (redacted) data formats or a specific, concrete exploitation scenario (like a specific curl command).
 
-You MUST strictly follow this 10-point structure:
+You MUST strictly follow this 10-point structure (UNLESS it is a false positive):
+
+If you determined this is a FALSE POSITIVE based on the rules above, you MUST NOT use the 10-point structure. Instead, simply write a 1-paragraph explanation of why it is a false positive, starting with the exact text `**FALSE POSITIVE**`.
+Example:
+**FALSE POSITIVE**
+The detected snippet `password = "INSERT_YOUR_PASSWORD_HERE"` is clearly a dummy placeholder and not a real hardcoded credential. No actual sensitive data is exposed.
+
+If it is a real vulnerability, follow this structure exactly:
 
 1. Clear, specific title
 2. Summary (2-3 sentences)
@@ -233,7 +241,8 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
         f"**File:** `{file_path}` (Line {line})\n"
         f"**Severity:** {severity}\n"
         f"**Message:** {message}\n\n"
-        f"**Code Snippet:**\n```\n{code_snippet}\n```"
+        f"**Code Snippet:**\n```\n{code_snippet}\n```\n\n"
+        f"Remember to classify this correctly. If it is an obvious placeholder or dummy value, strictly output ONLY a FALSE POSITIVE paragraph as instructed."
     )
 
     messages = [
