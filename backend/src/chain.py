@@ -353,6 +353,53 @@ def _get_vulnerability_summary(project_id: str) -> str:
     except Exception:
         return "Error reading vulnerability report."
 
+def _extract_listed_findings_from_text(answer_text: str, project_id: str) -> list:
+    """
+    Parses the LLM's chat response to figure out exactly which findings it listed,
+    and returns those finding objects from the authoritative report.json file.
+    
+    Matches standard format: 1. [High Risk] dashboard.html:12 - message
+    """
+    import json
+    import os
+    import re
+    
+    report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+    if not os.path.exists(report_path):
+        return []
+        
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        all_findings = data.get("results", [])
+    except Exception:
+        return []
+        
+    if not all_findings:
+        return []
+        
+    pattern = re.compile(r'\[.*?Risk\][\s\*\_\-]*`?([a-zA-Z0-9_.\-/]+)`?(?:\*\*|__)?(?:<[^>]+>)?:\s*(\d+)', re.IGNORECASE)
+    matches = pattern.findall(answer_text)
+    if not matches:
+        return []
+        
+    listed = []
+    for path_str, line_str in matches:
+        matched_finding = None
+        for f in all_findings:
+            f_path = f.get("path", "")
+            f_line = str(f.get("start", {}).get("line", ""))
+            
+            # The LLM is given path base names or partial paths, so match the end
+            if f_path.endswith(path_str) and f_line == line_str:
+                matched_finding = f
+                break
+                
+        if matched_finding:
+            listed.append(matched_finding)
+            
+    return listed
+
 
 def _build_prompt(question: str, chunks: list, history: list, file_tree: str = "Unknown", vuln_summary: str = "") -> list:
     """Returns a messages list for the chat completions API."""
@@ -616,8 +663,14 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
     append_to_session(session_id, {"role": "user", "text": question})
     
     asst_msg = {"role": "assistant", "text": answer}
-    if intent == "general_findings" and debug_context.get("retrieved_findings"):
+    
+    # Reliably extract what findings were actually listed in the answer
+    extracted_findings = _extract_listed_findings_from_text(answer, project_id)
+    if extracted_findings:
+        asst_msg["listed_findings"] = extracted_findings
+    elif debug_context.get("retrieved_findings"):
         asst_msg["listed_findings"] = debug_context["retrieved_findings"]
+
     append_to_session(session_id, asst_msg)
 
     sources = sorted({c["file_path"] for c in chunks})
