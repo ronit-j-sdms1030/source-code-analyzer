@@ -88,6 +88,10 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
         if os.path.exists(report_path):
             with open(report_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                
+            # Ignore vulnerabilities from .env.example files
+            data["results"] = [f for f in data.get("results", []) if not f.get("path", "").endswith(".env.example")]
+            
             file_cache = {}
             for finding in data.get("results", []):
                 # Convert absolute path to relative path
