@@ -1,8 +1,12 @@
-"""HuggingFace sentence-transformers embedding wrapper."""
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+import threading
 from functools import lru_cache
 
 from . import config
+
+_embed_lock = threading.Lock()
 
 
 @lru_cache(maxsize=1)
@@ -16,8 +20,9 @@ def embed_chunks(texts: list) -> list:
     """Converts a list of code chunk strings into vector embeddings (batched)."""
     if not texts:
         return []
-    model = _get_model()
-    return model.encode(texts, batch_size=32, show_progress_bar=False).tolist()
+    with _embed_lock:
+        model = _get_model()
+        return model.encode(texts, batch_size=32, show_progress_bar=False).tolist()
 
 
 def embed_query(text: str) -> list:
