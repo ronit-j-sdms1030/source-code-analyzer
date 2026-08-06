@@ -359,14 +359,20 @@ You will be provided with the full content of a source code file that contains a
 Your task is to fix the vulnerability by rewriting the entire file securely, BUT FIRST you must evaluate what new vulnerabilities or side-effects this fix might lead to.
 
 Rules:
-1. First, write a detailed Markdown section starting with `### Risk Assessment`. Explain the potential side effects of your proposed fix. Will it break backward compatibility? Will it lead to denial of service if not configured properly? Are there any new secondary risks introduced?
-2. Then, output the ENTIRE, fully fixed file contents inside a standard markdown code block.
-3. You MUST output the COMPLETE file from top to bottom. Do NOT truncate the file or use placeholders like `// ... rest of code`.
+1. First, write a detailed Markdown section starting with `### Risk Assessment`. 
+2. Inside the Risk Assessment, you MUST explicitly identify and list the EXACT vulnerabilities (risks) that will be caused or introduced if the user fixes this error. Format this as a warning (e.g., `> [!WARNING]`).
+3. Explain any other potential side effects of your proposed fix (e.g., backward compatibility, deployment issues).
+4. Then, output the ENTIRE, fully fixed file contents inside a standard markdown code block.
+5. You MUST output the COMPLETE file from top to bottom. Do NOT truncate the file or use placeholders like `// ... rest of code`.
 
 Format your response EXACTLY like this:
 
 ### Risk Assessment
-[Your detailed risk assessment here...]
+> [!WARNING]
+> **Potential New Vulnerabilities:** 
+> - [List exact vulnerabilities here...]
+
+[Your detailed explanation of other side effects...]
 
 ```[language]
 [ENTIRE fully fixed file contents here]
