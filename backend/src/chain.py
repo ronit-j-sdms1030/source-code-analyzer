@@ -899,7 +899,7 @@ def _call_cloud_llm(messages: list, model_name: str = None) -> str:
             f"{config.CLOUD_API_URL}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=30,
+            timeout=120,
         )
         resp.raise_for_status()
     except Exception as e:

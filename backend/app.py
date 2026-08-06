@@ -452,17 +452,17 @@ def push_fixes(project_id):
     try:
         repo = git.Repo(repo_path)
         
-        # Check if there are any changes to commit
-        if not repo.is_dirty() and not repo.untracked_files:
-            return jsonify({"error": "No security fixes have been applied yet. Nothing to push!"}), 400
-            
-        # Create and checkout new branch
-        current = repo.create_head(branch_name)
+        # Create or checkout branch
+        if branch_name in repo.heads:
+            current = repo.heads[branch_name]
+        else:
+            current = repo.create_head(branch_name)
         current.checkout()
         
-        # Add and commit all changes
-        repo.git.add(all=True)
-        repo.index.commit(commit_message)
+        # Add and commit all changes if the working tree is dirty
+        if repo.is_dirty() or repo.untracked_files:
+            repo.git.add(all=True)
+            repo.index.commit(commit_message)
         
         # Handle authentication if token is provided
         origin = repo.remotes.origin
@@ -479,8 +479,8 @@ def push_fixes(project_id):
         try:
             # Disable terminal prompt so git doesn't hang waiting for credentials
             os.environ["GIT_TERMINAL_PROMPT"] = "0"
-            # Push the branch
-            origin.push(branch_name)
+            # Push the branch (force push to overwrite old history on that branch)
+            origin.push(branch_name, force=True)
         finally:
             # Always restore original URL so the token isn't saved permanently
             if token:
