@@ -255,26 +255,24 @@ def apply_auto_fix(project_id: str, finding: dict) -> dict:
     system_prompt = """\
 You are an expert Security Engineer and software developer.
 You will be provided with the full content of a source code file that contains a security vulnerability.
-Your task is to fix the vulnerability by providing a SEARCH/REPLACE block.
+Your task is to fix the vulnerability by rewriting the entire file securely.
 
 Rules:
 1. First, write a brief 1-3 sentence description of exactly how you fixed the vulnerability.
-2. Then, provide a SEARCH/REPLACE block that replaces the vulnerable code with the fixed code.
-3. The SEARCH block MUST be an EXACT, character-for-character match of the original code, including whitespace and indentation.
+2. Then, output the ENTIRE, fully fixed file contents inside a standard markdown code block.
+3. You MUST output the COMPLETE file from top to bottom. Do NOT truncate the file or use placeholders like `// ... rest of code`.
 
 Security Guidelines:
-- Dockerfile Root Vulnerabilities: If fixing a container running as root, you MUST create a non-root user (e.g., `RUN useradd -m appuser`) AND explicitly switch to it using the `USER appuser` directive. Just creating the user is not enough!
-- CDN Integrity Hashes (SRI): If fixing a missing `integrity` attribute on a `<script>` or `<link>`, DO NOT add a fake or hallucinated hash, and DO NOT add hashes to `@latest` or unpinned URLs. A fake hash will instantly break the website. If you do not know the exact real hash for a specific pinned version, do NOT insert an `integrity` attribute. Instead, simply write a comment in the code (e.g. `<!-- TODO: Add SRI hash for pinned version -->`) or explain in your description that you cannot fix it automatically without internet access.
+- Dockerfile Root Vulnerabilities: If fixing a container running as root, you MUST create a non-root user (e.g., `RUN useradd -m appuser`) AND explicitly switch to it using the `USER appuser` directive.
+- CDN Integrity Hashes (SRI): If fixing a missing `integrity` attribute, DO NOT add a fake or hallucinated hash. If you do not know the exact real hash, simply write a comment in the code (e.g. `<!-- TODO: Add SRI hash -->`).
 
 Format your response EXACTLY like this:
 
 Brief description of the fix.
 
-<<<<
-[exact original code to replace]
-====
-[new fixed code]
->>>>
+```[language]
+[ENTIRE fully fixed file contents here]
+```
 """
     
     user_content = (
@@ -291,38 +289,23 @@ Brief description of the fix.
     response = _call_cloud_llm(messages, model_name=config.CLOUD_FIX_MODEL)
     
     # Extract the description and the code block from the response
-    if "<<<<" in response and "====" in response and ">>>>" in response:
-        description = response.split("<<<<")[0].strip()
-        search_block = response.split("<<<<")[1].split("====")[0].strip("\n")
-        replace_block = response.split("====")[1].split(">>>>")[0].strip("\n")
+    # Extract the description and the code block from the response
+    parts = response.split("```")
+    if len(parts) >= 3:
+        description = parts[0].strip() or "Fixed the vulnerability."
+        lines = parts[1].split("\n")
+        # Remove language identifier if present
+        if lines and not lines[0].strip().startswith(("import", "def", "class", "/", "*", "<")):
+            lines = lines[1:]
+        fixed_content = "\n".join(lines).strip()
         
-        if search_block in file_content:
-            fixed_content = file_content.replace(search_block, replace_block)
-        else:
-            # Fallback if exact match fails
-            fixed_content = file_content
-            description += f"\n\n**(Warning: Autofix failed to apply because the search block did not exactly match the file).**\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n```\n{replace_block}\n```"
-    elif "<<<<" in response and "====" not in response:
-        # The model dumped the entire file after <<<<
-        description = response.split("<<<<")[0].strip() or "Fixed the vulnerability."
-        fixed_content = response.split("<<<<")[1].replace(">>>>", "").strip()
         # Sanity check: don't wipe the file if the model only generated a tiny snippet
         if len(fixed_content) < len(file_content) * 0.2:
             description = f"**Autofix failed:** The AI output a partial snippet instead of the full file.\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n{response}"
             fixed_content = file_content
     else:
-        # Fallback to old behavior if LLM didn't use the SEARCH/REPLACE block at all
-        parts = response.split("```")
-        if len(parts) >= 3:
-            description = parts[0].strip() or "Fixed the vulnerability."
-            lines = parts[1].split("\n")
-            if lines and not lines[0].strip().startswith(("import", "def", "class", "/", "*")):
-                # It might be the language identifier like `javascript`
-                lines = lines[1:]
-            fixed_content = "\n".join(lines).strip()
-        else:
-            description = f"**Autofix failed:** The AI did not output a valid SEARCH/REPLACE format.\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n{response}"
-            fixed_content = file_content
+        description = f"**Autofix failed:** The AI did not output a valid code block.\n\n**Vulnerability:** {message}\n\n**Manual Solution Suggested by AI:**\n{response}"
+        fixed_content = file_content
         
     # Write the fixed content back to disk
     with open(full_path, "w", encoding="utf-8") as f:
