@@ -314,7 +314,7 @@ def evaluate_fix(project_id):
     try:
         result = evaluate_auto_fix(project_id, finding)
         if "error" in result:
-            return jsonify(result), 500
+            return jsonify(result), 200  # Return 200 so the frontend can display the error gracefully
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -71,7 +71,7 @@ const WINDOW_PADDING = 100;
  *   onClose   () => void
  */
 export default function CodeViewerPanel({ fileData, onClose, onApplyFix, isApplying }) {
-  const { content, start_line, end_line, language, file_path, stale } = fileData;
+  const { content, start_line, end_line, language, file_path, stale, finding = {} } = fileData;
 
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content || "");
@@ -240,21 +240,72 @@ export default function CodeViewerPanel({ fileData, onClose, onApplyFix, isApply
           </div>
         )}
 
-        {/* ── Vuln range legend ── */}
-        {!isEditing && (
-          <div className="code-viewer-legend">
-            <span className="code-viewer-legend-dot" />
-            <span>Vulnerable range</span>
-            {totalLines > WINDOW_PADDING * 2 && (
-              <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--text-tertiary)" }}>
-                Showing lines {winStart + 1}–{winEnd} of {totalLines.toLocaleString()}
-              </span>
+        {/* ── Main Content Split (Sidebar + Editor) ── */}
+        <div style={{ display: "flex", flexGrow: 1, overflow: "hidden" }}>
+          
+          {/* ── Left Sidebar: Issue & Fix ── */}
+          <div style={{ 
+            width: "280px", 
+            borderRight: "1px solid var(--border-hair)", 
+            padding: "20px", 
+            overflowY: "auto", 
+            background: "rgba(0,0,0,0.15)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "20px",
+            flexShrink: 0
+          }}>
+            <div>
+              <h4 style={{ margin: "0 0 10px 0", color: "var(--text-primary)", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", opacity: 0.8 }}>
+                Issue Description
+              </h4>
+              <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
+                {finding.extra?.message || "No description provided."}
+              </p>
+            </div>
+            
+            {finding.extra?.fix && finding.extra.fix.toLowerCase() !== "false" && (
+              <div>
+                <h4 style={{ margin: "0 0 10px 0", color: "var(--text-primary)", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", opacity: 0.8 }}>
+                  Suggested Fix
+                </h4>
+                <pre style={{ 
+                  margin: 0, 
+                  background: "rgba(0,0,0,0.3)", 
+                  padding: "12px", 
+                  borderRadius: "6px", 
+                  overflowX: "auto", 
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                  border: "1px solid var(--border-hair)",
+                  color: "#4ade80", /* green for fix */
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: "12.5px",
+                  lineHeight: "1.4"
+                }}>
+                  {finding.extra.fix}
+                </pre>
+              </div>
             )}
           </div>
-        )}
 
-        {/* ── Code body ── */}
-        <div className="code-viewer-body" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          {/* ── Right Content: Editor ── */}
+          <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {/* ── Vuln range legend ── */}
+            {!isEditing && (
+              <div className="code-viewer-legend">
+                <span className="code-viewer-legend-dot" />
+                <span>Vulnerable range</span>
+                {totalLines > WINDOW_PADDING * 2 && (
+                  <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--text-tertiary)" }}>
+                    Showing lines {winStart + 1}–{winEnd} of {totalLines.toLocaleString()}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* ── Code body ── */}
+            <div className="code-viewer-body" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           {isEditing ? (
             <textarea
               ref={textareaRef}
@@ -308,6 +359,8 @@ export default function CodeViewerPanel({ fileData, onClose, onApplyFix, isApply
               {windowedContent}
             </SyntaxHighlighter>
           )}
+        </div>
+        </div>
         </div>
       </div>
     </div>

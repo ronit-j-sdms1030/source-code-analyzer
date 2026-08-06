@@ -198,15 +198,19 @@ export default function SourceCodeAnalyzer() {
   };
 
   const askQuestion = async (projectId, question) => {
+    // 1. Get current session ID from project state
+    const project = projects.find(p => p.id === projectId);
+    const sessionId = project?.sessionId;
+
     updateProject(projectId, (p) => ({
       messages: [...p.messages, { role: "user", text: question }, { role: "assistant", pending: true }],
     }));
     try {
-      const { answer, sources } = await apiAskQuestion(projectId, question);
+      const { answer, sources, sessionId: returnedSessionId } = await apiAskQuestion(projectId, question, sessionId);
       updateProject(projectId, (p) => {
         const msgs = [...p.messages];
         msgs[msgs.length - 1] = { role: "assistant", text: answer, sources: sources || [] };
-        return { messages: msgs };
+        return { messages: msgs, sessionId: returnedSessionId || p.sessionId };
       });
     } catch (err) {
       updateProject(projectId, (p) => {

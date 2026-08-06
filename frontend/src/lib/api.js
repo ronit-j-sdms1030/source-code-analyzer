@@ -84,10 +84,10 @@ export function rescanVulnerabilities(id) {
   });
 }
 
-export function askQuestion(projectId, question) {
+export function askQuestion(projectId, question, sessionId) {
   return request("/chat", {
     method: "POST",
-    body: JSON.stringify({ projectId, question }),
+    body: JSON.stringify({ projectId, question, sessionId }),
   });
 }
 

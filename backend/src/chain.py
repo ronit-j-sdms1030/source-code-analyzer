@@ -334,7 +334,59 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
     import uuid
     
     history = get_session_history(session_id)
-    intent_data = classify_intent(history, question)
+    
+    # ── Ordinal and Plural Resolution Logic ──
+    import re
+    ordinal_idx = None
+    resolved_findings = []
+    
+    ordinal_match = re.search(r'(?:risk|finding|issue|number|#)\s*(\d+)', question.lower())
+    if ordinal_match:
+        ordinal_idx = int(ordinal_match.group(1)) - 1
+    else:
+        text_ordinals = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4, "fifth": 5, "5th": 5}
+        for word, num in text_ordinals.items():
+            if re.search(rf'\b{word}\b', question.lower()):
+                ordinal_idx = num - 1
+                break
+
+    is_plural_or_all = any(w in question.lower() for w in ["risks", "findings", "issues", "all of them", "these", "all fixes", "them", "all"])
+    is_fix = any(w in question.lower() for w in ["fix", "patch", "resolve", "correct", "repair"])
+
+    if ordinal_idx is not None or (is_plural_or_all and is_fix):
+        last_listed = None
+        for msg in reversed(history):
+            if msg.get("role") == "assistant" and "listed_findings" in msg:
+                last_listed = msg["listed_findings"]
+                break
+        
+        if last_listed:
+            if ordinal_idx is not None:
+                if 0 <= ordinal_idx < len(last_listed):
+                    resolved_findings = [last_listed[ordinal_idx]]
+                else:
+                    ans = f"You referred to finding number {ordinal_idx + 1}, but I only listed {len(last_listed)} findings. Could you clarify?"
+                    append_to_session(session_id, {"role": "user", "text": question})
+                    append_to_session(session_id, {"role": "assistant", "text": ans})
+                    return {"answer": ans, "sources": [], "debug_context": {}}
+            else:
+                resolved_findings = last_listed
+        else:
+            ans = "I'm not sure which finding you are referring to. Could you ask me to list the risks first?"
+            append_to_session(session_id, {"role": "user", "text": question})
+            append_to_session(session_id, {"role": "assistant", "text": ans})
+            return {"answer": ans, "sources": [], "debug_context": {}}
+
+    if resolved_findings:
+        if is_fix and len(resolved_findings) > 1:
+            return _handle_multiple_fix_requests(project_id, question, session_id, history, resolved_findings, {"intent": {"intent": "fix_request"}})
+        else:
+            intent_data = {
+                "intent": "fix_request" if is_fix else "specific_finding", 
+                "entities": {"finding_id": resolved_findings[0].get("finding_id")}
+            }
+    else:
+        intent_data = classify_intent(history, question)
     
     intent = intent_data.get("intent", "general_code")
     entities = intent_data.get("entities", {})
@@ -386,16 +438,24 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
         where_clause = None
         if entities.get("finding_id"):
             where_clause = {"finding_id": entities["finding_id"]}
-        elif entities.get("file_path"):
-            conditions = [{"file_path": {"$eq": entities["file_path"]}}]
+        elif entities.get("file_path") or entities.get("severity") or (entities.get("cwe_or_keyword") and entities["cwe_or_keyword"].startswith("CWE-")):
+            conditions = []
+            if entities.get("file_path"):
+                conditions.append({"file_path": {"$eq": entities["file_path"]}})
+            if entities.get("severity"):
+                sev = entities["severity"].upper()
+                if sev == "HIGH": sev = "ERROR"
+                elif sev == "MEDIUM": sev = "WARNING"
+                elif sev == "LOW": sev = "INFO"
+                conditions.append({"severity": {"$eq": sev}})
             if entities.get("line_number"):
                 conditions.append({"line_number": {"$eq": entities["line_number"]}})
-            elif entities.get("cwe_or_keyword") and entities["cwe_or_keyword"].startswith("CWE-"):
-                # Only strictly filter by CWE if it looks like a real CWE ID, since keyword won't exact-match cwe_id.
+            if entities.get("cwe_or_keyword") and entities["cwe_or_keyword"].startswith("CWE-"):
                 conditions.append({"cwe_id": {"$eq": entities["cwe_or_keyword"]}})
+                
             if len(conditions) > 1:
                 where_clause = {"$and": conditions}
-            else:
+            elif len(conditions) == 1:
                 where_clause = conditions[0]
                 
         if where_clause:
@@ -412,8 +472,11 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
                 append_to_session(session_id, {"role": "user", "text": question})
                 opts = []
                 for m in metas:
-                    opts.append(f"Line {m.get('line_number')} ({m.get('cwe_id')})")
-                ans = f"There are multiple matching findings in `{entities.get('file_path')}`. Did you mean: " + ", ".join(opts) + "?"
+                    opts.append(f"`{m.get('file_path')}` (Line {m.get('line_number')})")
+                if entities.get('file_path'):
+                    ans = f"There are multiple matching findings in `{entities.get('file_path')}`. Did you mean: " + ", ".join(opts[:3]) + ("?" if len(opts) <= 3 else ", ...?")
+                else:
+                    ans = f"There are multiple matching findings. Did you mean: " + ", ".join(opts[:3]) + ("?" if len(opts) <= 3 else ", ...?")
                 append_to_session(session_id, {"role": "assistant", "text": ans})
                 return {"answer": ans, "sources": [], "debug_context": debug_context}
             else:
@@ -471,7 +534,11 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
         debug_context["inferred_from_history"] = inferred
 
     append_to_session(session_id, {"role": "user", "text": question})
-    append_to_session(session_id, {"role": "assistant", "text": answer})
+    
+    asst_msg = {"role": "assistant", "text": answer}
+    if intent == "general_findings" and debug_context.get("retrieved_findings"):
+        asst_msg["listed_findings"] = debug_context["retrieved_findings"]
+    append_to_session(session_id, asst_msg)
 
     sources = sorted({c["file_path"] for c in chunks})
     return {"answer": answer, "sources": sources, "debug_context": debug_context}
@@ -546,6 +613,63 @@ Explain conversationally to the user how the vulnerability was fixed. Do not out
     append_to_session(session_id, {"role": "assistant", "text": final_answer})
     
     return {"answer": final_answer, "sources": [file_path], "debug_context": debug_context}
+
+
+def _handle_multiple_fix_requests(project_id: str, question: str, session_id: str, history: list, finding_metas: list, debug_context: dict) -> dict:
+    from .memory import append_to_session
+    import os
+    import json
+    
+    append_to_session(session_id, {"role": "user", "text": question})
+    
+    combined_answers = []
+    sources = set()
+    
+    for idx, finding_meta in enumerate(finding_metas):
+        title = f"### Fix for Finding {idx + 1} (`{finding_meta.get('file_path')}`)\n\n"
+        
+        fp_status = finding_meta.get("status", "") or ""
+        fp_message = finding_meta.get("message", "") or ""
+        if fp_status == "false_positive" or "FALSE POSITIVE" in fp_message.upper():
+            combined_answers.append(title + "⚠️ **No action needed.** This finding was classified as a false positive.")
+            continue
+            
+        file_path = finding_meta.get("file_path", "")
+        full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
+        if not os.path.exists(full_path):
+            combined_answers.append(title + f"Cannot apply fix: file {file_path} not found on disk.")
+            continue
+            
+        with open(full_path, "r", encoding="utf-8") as f:
+            file_content = f.read()
+            
+        report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+        message = finding_meta.get("cwe_id", "Unknown vulnerability")
+        if os.path.exists(report_path):
+            with open(report_path, "r", encoding="utf-8") as f:
+                report_data = json.load(f)
+                for r in report_data.get("results", []):
+                    if r.get("path") == file_path and r.get("start", {}).get("line") == finding_meta.get("line_number"):
+                        message = r.get("extra", {}).get("message", message)
+                        break
+                        
+        qwen_sys = "You are an expert Security Engineer. Fix the following vulnerability in the provided file.\nOutput a targeted patch or unified diff showing only the specific changes needed, along with a few lines of surrounding context. Do not rewrite the entire file."
+        qwen_user = f"Vulnerability Message: {message}\nLine Number: {finding_meta.get('line_number')}\n\nFile Content:\n```\n{file_content}\n```"
+        qwen_msg = [{"role": "system", "content": qwen_sys}, {"role": "user", "content": qwen_user}]
+        diff_output = _call_cloud_llm(qwen_msg, model_name=config.CLOUD_FIX_MODEL)
+        
+        llama_sys = "You are a Source Code Analyzer assistant. A dedicated fixing model has just generated a code fix for a vulnerability.\nExplain conversationally to the user how the vulnerability was fixed. Do not output code blocks of the entire file, just summarize the approach."
+        llama_user = f"Here is the vulnerability: {message}\nHere is the diff of the fix:\n{diff_output}"
+        llama_msg = [{"role": "system", "content": llama_sys}, {"role": "user", "content": llama_user}]
+        llama_summary = _call_cloud_llm(llama_msg)
+        
+        combined_answers.append(title + f"{llama_summary}\n\n**Proposed Patch:**\n\n{diff_output}")
+        sources.add(file_path)
+        
+    final_answer = "\n\n---\n\n".join(combined_answers)
+    append_to_session(session_id, {"role": "assistant", "text": final_answer})
+    
+    return {"answer": final_answer, "sources": sorted(sources), "debug_context": debug_context}
 
 
 def _is_false_positive(code_snippet: str, message: str) -> bool:

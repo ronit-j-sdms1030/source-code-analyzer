@@ -14,6 +14,7 @@ Output ONLY valid JSON matching this schema exactly:
     "finding_id": "string or null",
     "line_number": "integer or null",
     "cwe_or_keyword": "string or null",
+    "severity": "string or null (e.g. 'HIGH', 'MEDIUM', 'LOW')",
     "include_false_positives": true|false,
     "memory_trigger": "string or null (if the user asked to remember a preference or rule)",
     "requires_long_term_memory": true|false
@@ -100,6 +101,7 @@ Examples:
                 "finding_id": None,
                 "line_number": None,
                 "cwe_or_keyword": None,
+                "severity": None,
                 "include_false_positives": False,
                 "memory_trigger": None,
                 "requires_long_term_memory": False
