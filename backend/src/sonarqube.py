@@ -93,22 +93,20 @@ def _run_sonar_scan(project_id: str, repo_path: str):
         return
         
     token = creds.get("token")
-    if not token:
-        save_quality_metrics(project_id, {"status": "error", "error": "No scanner token available."})
-        return
-
-    # Setup native sonar-scanner CLI (Docker removed as requested)
+    # Setup scanner container with host networking to reach localhost:9000
     cmd = [
-        "sonar-scanner",
+        "docker", "run", "--rm",
+        "-v", f"{repo_path}:/usr/src",
+        "--network", "host",
+        "sonarsource/sonar-scanner-cli",
         f"-Dsonar.projectKey={project_id}",
-        "-Dsonar.sources=.",
         "-Dsonar.host.url=http://127.0.0.1:9000",
         f"-Dsonar.token={token}"
     ]
     
     try:
         save_quality_metrics(project_id, {"status": "running", "stage": "Scanning codebase"})
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_path)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print("SonarScanner failed:", result.stderr)
             save_quality_metrics(project_id, {"status": "error", "error": "Scanner failed. See logs for details."})
