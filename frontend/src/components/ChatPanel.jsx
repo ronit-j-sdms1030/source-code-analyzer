@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import Icon from "./icons";
-import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities } from "../lib/api";
+import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities, applyEvaluatedFix } from "../lib/api";
 import { MODEL_NAME } from "../lib/api";
 
 const CodeBlock = ({ node, inline, className, children, ...props }) => {
@@ -52,8 +52,31 @@ const CodeBlock = ({ node, inline, className, children, ...props }) => {
   );
 };
 
-export function ChatMessage({ msg }) {
+export function ChatMessage({ msg, onApplyFix }) {
   const isUser = msg.role === "user";
+  const [applyingFixFor, setApplyingFixFor] = useState(null);
+
+  const renderPayloads = () => {
+    if (!msg.evaluate_fix_payloads) return null;
+    return msg.evaluate_fix_payloads.map((payload, idx) => (
+      <div key={idx} style={{ marginTop: "16px", padding: "12px", backgroundColor: "var(--bg-panel-raised)", borderRadius: "6px", border: "1px solid var(--border-color)" }}>
+        <ReactMarkdown components={{ code: CodeBlock }}>{payload.risk_assessment}</ReactMarkdown>
+        <button
+          className="action-btn"
+          style={{ marginTop: "12px", padding: "8px 16px", backgroundColor: "#3b82f6", color: "white", borderRadius: "4px", width: "100%", textAlign: "center", cursor: applyingFixFor === idx ? "not-allowed" : "pointer" }}
+          disabled={applyingFixFor === idx}
+          onClick={async () => {
+            setApplyingFixFor(idx);
+            await onApplyFix(payload.finding, payload.fixed_content);
+            setApplyingFixFor(null);
+          }}
+        >
+          {applyingFixFor === idx ? "Applying Fix..." : "Apply Fix"}
+        </button>
+      </div>
+    ));
+  };
+
   return (
     <div className={`msg ${isUser ? "msg-user" : "msg-assistant"}`}>
       <div className="msg-role">{isUser ? "You" : MODEL_NAME}</div>
@@ -69,6 +92,7 @@ export function ChatMessage({ msg }) {
                 if (isUser || !msg.text) return <ReactMarkdown components={{ code: CodeBlock }}>{msg.text}</ReactMarkdown>;
                 return <ReactMarkdown components={{ code: CodeBlock }}>{msg.text}</ReactMarkdown>;
               })()}
+              {renderPayloads()}
             </div>
             {msg.sources && msg.sources.length > 0 && (
               <div className="source-chips">
@@ -96,6 +120,18 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
   }, [onRefresh]);
   
 
+  const handleApplyFix = async (finding, fixed_content) => {
+    try {
+      const res = await applyEvaluatedFix(project.id, finding, fixed_content);
+      if (res?.message && onAddMessage) {
+        onAddMessage(project.id, "assistant", `**✨ Fix Applied:** ${res.message}`);
+      }
+      await rescanVulnerabilities(project.id);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      alert("Error applying fix: " + err.message);
+    }
+  };
 
   const [rescanning, setRescanning] = useState(false);
   const handleRescan = async () => {
@@ -225,7 +261,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
 
       <div className="chat-scroll" ref={scrollRef}>
         {project.messages.map((m, i) => (
-          <ChatMessage msg={m} key={i} />
+          <ChatMessage msg={m} key={i} onApplyFix={handleApplyFix} />
         ))}
       </div>
 

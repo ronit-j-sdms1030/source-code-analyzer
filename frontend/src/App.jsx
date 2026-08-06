@@ -206,10 +206,10 @@ export default function SourceCodeAnalyzer() {
       messages: [...p.messages, { role: "user", text: question }, { role: "assistant", pending: true }],
     }));
     try {
-      const { answer, sources, sessionId: returnedSessionId } = await apiAskQuestion(projectId, question, sessionId);
+      const { answer, sources, sessionId: returnedSessionId, evaluate_fix_payloads } = await apiAskQuestion(projectId, question, sessionId);
       updateProject(projectId, (p) => {
         const msgs = [...p.messages];
-        msgs[msgs.length - 1] = { role: "assistant", text: answer, sources: sources || [] };
+        msgs[msgs.length - 1] = { role: "assistant", text: answer, sources: sources || [], evaluate_fix_payloads };
         return { messages: msgs, sessionId: returnedSessionId || p.sessionId };
       });
     } catch (err) {

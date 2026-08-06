@@ -710,42 +710,61 @@ def _handle_fix_request(project_id: str, question: str, session_id: str, history
         
     # Get the full finding details from report
     report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
-    message = finding_meta.get("cwe_id", "Unknown vulnerability")
+    full_finding = None
     if os.path.exists(report_path):
         with open(report_path, "r", encoding="utf-8") as f:
             report_data = json.load(f)
             for r in report_data.get("results", []):
-                if r.get("path") == file_path and r.get("start", {}).get("line") == finding_meta.get("line_number"):
-                    message = r.get("extra", {}).get("message", message)
+                # report path is absolute, file_path is relative usually, check endswith
+                f_path = r.get("path", "")
+                f_line = r.get("start", {}).get("line")
+                if f_path.endswith(file_path) and f_line == finding_meta.get("line_number"):
+                    full_finding = r
                     break
                     
-    # Qwen Coder fix generation
-    qwen_sys = """\
-You are an expert Security Engineer. Fix the following vulnerability in the provided file.
-Output a targeted patch or unified diff showing only the specific changes needed, along with a few lines of surrounding context. Do not rewrite the entire file.
-"""
-    qwen_user = f"Vulnerability Message: {message}\nLine Number: {finding_meta.get('line_number')}\n\nFile Content:\n```\n{file_content}\n```"
-    qwen_msg = [{"role": "system", "content": qwen_sys}, {"role": "user", "content": qwen_user}]
-    
-    diff_output = _call_cloud_llm(qwen_msg, model_name=config.CLOUD_FIX_MODEL)
-    
-    # Llama 3.1 8B Summarization
-    llama_sys = """\
-You are a Source Code Analyzer assistant. A dedicated fixing model has just generated a code fix for a vulnerability.
-Explain conversationally to the user how the vulnerability was fixed. Do not output code blocks of the entire file, just summarize the approach.
-"""
-    llama_user = f"Here is the vulnerability: {message}\nHere is the diff of the fix:\n{diff_output}"
-    llama_msg = [{"role": "system", "content": llama_sys}, {"role": "user", "content": llama_user}]
-    
-    llama_summary = _call_cloud_llm(llama_msg)
-    
-    # Combine — prepend inference transparency notice if applicable
-    final_answer = f"{inference_prefix}{llama_summary}\n\n**Proposed Patch:**\n\n{diff_output}"
-    
-    append_to_session(session_id, {"role": "user", "text": question})
-    append_to_session(session_id, {"role": "assistant", "text": final_answer})
-    
-    return {"answer": final_answer, "sources": [file_path], "debug_context": debug_context}
+    if not full_finding:
+        # Fallback if we couldn't find the exact object in the report
+        full_finding = {
+            "path": file_path,
+            "start": {"line": finding_meta.get("line_number")},
+            "extra": {"message": finding_meta.get("cwe_id", "Unknown vulnerability")}
+        }
+        
+    from .chain import evaluate_auto_fix
+    try:
+        eval_result = evaluate_auto_fix(project_id, full_finding)
+        
+        if eval_result.get("false_positive"):
+            final_answer = eval_result["risk_assessment"]
+            payload = None
+        elif "error" in eval_result:
+            final_answer = f"Error evaluating fix: {eval_result['error']}"
+            payload = None
+        else:
+            final_answer = f"{inference_prefix}I have evaluated a fix for this vulnerability."
+            payload = {
+                "risk_assessment": eval_result["risk_assessment"],
+                "fixed_content": eval_result["fixed_content"],
+                "finding": full_finding
+            }
+            
+        asst_msg = {"role": "assistant", "text": final_answer}
+        if payload:
+            asst_msg["evaluate_fix_payloads"] = [payload]
+            
+        append_to_session(session_id, {"role": "user", "text": question})
+        append_to_session(session_id, asst_msg)
+        
+        res = {"answer": final_answer, "sources": [file_path], "debug_context": debug_context}
+        if payload:
+            res["evaluate_fix_payloads"] = [payload]
+        return res
+        
+    except Exception as e:
+        ans = f"Error applying fix: {str(e)}"
+        append_to_session(session_id, {"role": "user", "text": question})
+        append_to_session(session_id, {"role": "assistant", "text": ans})
+        return {"answer": ans, "sources": [], "debug_context": debug_context}
 
 
 def _handle_multiple_fix_requests(project_id: str, question: str, session_id: str, history: list, finding_metas: list, debug_context: dict) -> dict:
@@ -756,6 +775,7 @@ def _handle_multiple_fix_requests(project_id: str, question: str, session_id: st
     append_to_session(session_id, {"role": "user", "text": question})
     
     combined_answers = []
+    payloads = []
     sources = set()
     
     for idx, finding_meta in enumerate(finding_metas):
@@ -776,33 +796,57 @@ def _handle_multiple_fix_requests(project_id: str, question: str, session_id: st
         with open(full_path, "r", encoding="utf-8") as f:
             file_content = f.read()
             
+        from .chain import evaluate_auto_fix
+        
         report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
-        message = finding_meta.get("cwe_id", "Unknown vulnerability")
+        full_finding = None
         if os.path.exists(report_path):
             with open(report_path, "r", encoding="utf-8") as f:
                 report_data = json.load(f)
                 for r in report_data.get("results", []):
-                    if r.get("path") == file_path and r.get("start", {}).get("line") == finding_meta.get("line_number"):
-                        message = r.get("extra", {}).get("message", message)
+                    f_path = r.get("path", "")
+                    f_line = r.get("start", {}).get("line")
+                    if f_path.endswith(file_path) and f_line == finding_meta.get("line_number"):
+                        full_finding = r
                         break
                         
-        qwen_sys = "You are an expert Security Engineer. Fix the following vulnerability in the provided file.\nOutput a targeted patch or unified diff showing only the specific changes needed, along with a few lines of surrounding context. Do not rewrite the entire file."
-        qwen_user = f"Vulnerability Message: {message}\nLine Number: {finding_meta.get('line_number')}\n\nFile Content:\n```\n{file_content}\n```"
-        qwen_msg = [{"role": "system", "content": qwen_sys}, {"role": "user", "content": qwen_user}]
-        diff_output = _call_cloud_llm(qwen_msg, model_name=config.CLOUD_FIX_MODEL)
-        
-        llama_sys = "You are a Source Code Analyzer assistant. A dedicated fixing model has just generated a code fix for a vulnerability.\nExplain conversationally to the user how the vulnerability was fixed. Do not output code blocks of the entire file, just summarize the approach."
-        llama_user = f"Here is the vulnerability: {message}\nHere is the diff of the fix:\n{diff_output}"
-        llama_msg = [{"role": "system", "content": llama_sys}, {"role": "user", "content": llama_user}]
-        llama_summary = _call_cloud_llm(llama_msg)
-        
-        combined_answers.append(title + f"{llama_summary}\n\n**Proposed Patch:**\n\n{diff_output}")
+        if not full_finding:
+            full_finding = {
+                "path": file_path,
+                "start": {"line": finding_meta.get("line_number")},
+                "extra": {"message": finding_meta.get("cwe_id", "Unknown vulnerability")}
+            }
+            
+        try:
+            eval_result = evaluate_auto_fix(project_id, full_finding)
+            
+            if eval_result.get("false_positive"):
+                combined_answers.append(title + eval_result["risk_assessment"])
+            elif "error" in eval_result:
+                combined_answers.append(title + f"Error evaluating fix: {eval_result['error']}")
+            else:
+                combined_answers.append(title + "I have evaluated a fix for this vulnerability.")
+                payloads.append({
+                    "risk_assessment": eval_result["risk_assessment"],
+                    "fixed_content": eval_result["fixed_content"],
+                    "finding": full_finding
+                })
+        except Exception as e:
+            combined_answers.append(title + f"Error applying fix: {str(e)}")
+            
         sources.add(file_path)
         
     final_answer = "\n\n---\n\n".join(combined_answers)
-    append_to_session(session_id, {"role": "assistant", "text": final_answer})
+    asst_msg = {"role": "assistant", "text": final_answer}
+    if payloads:
+        asst_msg["evaluate_fix_payloads"] = payloads
+        
+    append_to_session(session_id, asst_msg)
     
-    return {"answer": final_answer, "sources": sorted(sources), "debug_context": debug_context}
+    res = {"answer": final_answer, "sources": sorted(sources), "debug_context": debug_context}
+    if payloads:
+        res["evaluate_fix_payloads"] = payloads
+    return res
 
 
 def _is_false_positive(code_snippet: str, message: str) -> bool:
