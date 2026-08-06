@@ -641,11 +641,10 @@ have access to the pre-filter logic and your judgment on this is unreliable.
 
 You MUST strictly follow this 10-point structure for ALL vulnerability types:
 
-1. Clear, specific title
+1. Problem
 2. Summary (2-3 sentences)
 3. Affected component (File path, line numbers)
-4. Vulnerability classification (CWE ID from the lookup table provided, CVSS 3.1 vector string
-   computed using the math rules provided, exact mathematically correct score, and OWASP category)
+4. Vulnerability classification (CWE ID from the lookup table, CVSS 3.1 vector string, and OWASP category)
 5. Detailed technical description (How it works, root cause)
 6. Proof of Concept (PoC) — Concrete scenario, e.g. a specific curl command or payload, NOT generic bullets
 7. Impact assessment (What an attacker can achieve based on actual reachability and environment)
