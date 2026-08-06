@@ -58,37 +58,7 @@ export function ChatMessage({ msg }) {
             <div className="msg-text">
               {(() => {
                 if (isUser || !msg.text) return <ReactMarkdown components={{ code: CodeBlock }}>{msg.text}</ReactMarkdown>;
-                const parts = msg.text.split(/\[ACTION:FIX:(\d+)\]/);
-                if (parts.length === 1) return <ReactMarkdown components={{ code: CodeBlock }}>{msg.text}</ReactMarkdown>;
-                let fixButtonIndex = 1;
-                return parts.map((part, i) => {
-                  if (i % 2 === 1) {
-                    const vulnNum = parseInt(part, 10);
-                    const displayNum = fixButtonIndex++;
-                    return (
-                      <button 
-                        key={i} 
-                        onClick={() => window.onChatAutoFix && window.onChatAutoFix(vulnNum)}
-                        disabled={window.chatFixingFor === vulnNum || window.chatFixStatus?.[vulnNum] === 'success'}
-                        className={window.chatFixingFor === vulnNum ? "btn-fixing" : ""}
-                        style={{
-                          background: window.chatFixStatus?.[vulnNum] === 'success' ? "var(--status-ready)" : "var(--accent)",
-                          color: "#fff",
-                          border: "none",
-                          padding: "4px 10px",
-                          borderRadius: "4px",
-                          cursor: window.chatFixingFor === vulnNum || window.chatFixStatus?.[vulnNum] === 'success' ? "not-allowed" : "pointer",
-                          fontSize: "12px",
-                          margin: "0 4px",
-                          display: "inline-block"
-                        }}
-                      >
-                        {window.chatFixingFor === vulnNum ? "Fixing..." : window.chatFixStatus?.[vulnNum] === 'success' ? "Fixed" : `Fix`}
-                      </button>
-                    );
-                  }
-                  return <ReactMarkdown components={{ code: CodeBlock }} key={i}>{part}</ReactMarkdown>;
-                });
+                return <ReactMarkdown components={{ code: CodeBlock }}>{msg.text}</ReactMarkdown>;
               })()}
             </div>
             {msg.sources && msg.sources.length > 0 && (
@@ -132,35 +102,6 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
 
   const v = project.vulnerabilities;
   const hasVulns = v && (v.high > 0 || v.medium > 0 || v.low > 0);
-
-  const [chatFixingFor, setChatFixingFor] = useState(null);
-  const [chatFixStatus, setChatFixStatus] = useState({});
-
-  useEffect(() => {
-    window.chatFixingFor = chatFixingFor;
-    window.chatFixStatus = chatFixStatus;
-    window.onChatAutoFix = async (vulnNum) => {
-      setChatFixingFor(vulnNum);
-      setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'applying' }));
-      try {
-        const data = await getVulnerabilities(project.id);
-        const finding = data?.results?.[vulnNum - 1];
-        if (finding) {
-          const res = await autoFixVulnerability(project.id, finding);
-          setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'success' }));
-          if (res?.message && onAddMessage) {
-            onAddMessage(project.id, "assistant", `**✨ Fix Applied:** ${res.message}`);
-          }
-          if (window.onRefreshProjects) window.onRefreshProjects();
-        } else {
-          setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'Error: finding not found' }));
-        }
-      } catch (err) {
-        setChatFixStatus((prev) => ({ ...prev, [vulnNum]: 'Error: ' + err.message }));
-      }
-      setChatFixingFor(null);
-    };
-  }, [project.id, chatFixingFor, chatFixStatus]);
 
   useEffect(() => {
     if (scrollRef.current) {

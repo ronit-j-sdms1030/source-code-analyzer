@@ -43,8 +43,7 @@ Rules:
 - If the user asks about a specific severity (e.g., high, medium, or low risk), you MUST state the exact count of those specific vulnerabilities found in the report before listing them. When listing a filtered subset, renumber the list to start from 1.
 - ALWAYS rely on the `Vulnerability Report` section provided in this system prompt for the current state of vulnerabilities, EXCEPT when the user asks what was just fixed.
 - CRITICAL EXCEPTION: If the user explicitly asks "what was fixed", "which vulnerabilities were just fixed", or similar, you MUST read the conversation history for recent 'Fix Applied' messages. Do NOT look at the current Vulnerability Report (which will be clean). Summarize the fixes you see in the chat history. Do not claim there are no vulnerabilities to fix.
-- CRITICAL: If the user explicitly asks to fix a specific vulnerability, output the `[ACTION:FIX:<N>]` token (where `<N>` is the GLOBAL index number exactly as it appears in the Vulnerability Report). Even if you renumbered or reordered the list, `<N>` MUST be the original global index from the raw Vulnerability Report section below.
-- If the user asks to fix MULTIPLE vulnerabilities/risks or says something like 'I want to fix them', you must propose fixing them one by one in order. Ask them to confirm fixing the FIRST one in your ordered list, and output the `[ACTION:FIX:<N>]` token for ONLY that first vulnerability. Do not provide fix instructions or buttons for the others until the first one is resolved.
+- If the user asks you to fix a vulnerability, you MUST inform them that fixes can only be applied through the "View Report" modal. Instruct them to open the Vulnerability Report and use the "Evaluate Fix" workflow. Do not attempt to output any fix buttons or fix tokens.
 """
 def _get_vulnerability_summary(project_id: str) -> str:
     import json
