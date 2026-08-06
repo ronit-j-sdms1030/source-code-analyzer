@@ -1305,12 +1305,7 @@ Format your response EXACTLY like this:
         print(f"[Token Savings] Graph returned no useful dependencies, falling back to Chroma semantic search (base file ~{base_tokens} tokens)")
         
         # Fallback to ChromaDB semantic similarity if graph is empty
-        from .vectorstore import query_chunks
         query_text = f"{file_path} {message}"
-        results = query_chunks(project_id, None, top_k=2) # We don't have the query vector here, but query_chunks might need it? 
-        # Actually vectorstore.py's query_chunks requires query_vector. We'd have to embed it. 
-        # Let's just fallback to the base file content for simplicity if we don't want to import the embedder here.
-        # Wait, the instruction says "Fall back to ChromaDB only if the graph lookup returns nothing useful".
         
         try:
             from .vectorstore import query_chunks
