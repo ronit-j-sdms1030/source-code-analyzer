@@ -333,9 +333,9 @@ body { margin: 0; padding: 0; }
 .markdown-body p { margin-bottom: 12px; }
 .markdown-body ul, .markdown-body ol { margin: 0 0 12px 20px; padding: 0; }
 .markdown-body li { margin-bottom: 4px; }
-.markdown-body code { background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 0.9em; }
+.markdown-body code { background: var(--bg-panel-raised); border: 1px solid var(--text-tertiary); color: var(--text-primary); padding: 2px 4px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 0.9em; }
 .markdown-body pre { background: var(--bg-void); padding: 12px; border-radius: 6px; overflow-x: auto; margin-bottom: 12px; border: 1px solid var(--border-hair); }
-.markdown-body pre code { background: none; padding: 0; border-radius: 0; }
+.markdown-body pre code { background: none; border: none; padding: 0; border-radius: 0; }
 .markdown-body strong { color: var(--accent); font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -365,4 +365,101 @@ body { margin: 0; padding: 0; }
   cursor: wait !important;
   background: var(--status-ready) !important;
   color: #fff !important;
+}
+
+/* ── Code Viewer Panel ──────────────────────────────────────────────────────── */
+
+.code-viewer-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end; /* Slide in from right */
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+.code-viewer-panel {
+  width: 75%;
+  max-width: 900px;
+  height: 100%;
+  background: #0d1117; /* GitHub dark dim */
+  border-left: 1px solid var(--border-hair);
+  box-shadow: -10px 0 30px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.code-viewer-header {
+  flex-shrink: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: #161b22;
+  border-bottom: 1px solid var(--border-hair);
+}
+
+.code-viewer-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.code-viewer-stale-banner {
+  background: rgba(242, 184, 75, 0.1);
+  color: var(--status-indexing);
+  padding: 10px 20px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgba(242, 184, 75, 0.2);
+}
+
+.code-viewer-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: rgba(0,0,0,0.2);
+  border-bottom: 1px solid var(--border-hair);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.code-viewer-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(240, 85, 63, 0.18);
+  border-left: 3px solid var(--status-error);
+}
+
+.code-viewer-body {
+  flex-grow: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #0d1117;
+}
+
+/* Fix for syntax highlighter taking full width */
+.code-viewer-body pre {
+  min-width: 100%;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin-icon {
+  animation: spin 1s linear infinite;
 }

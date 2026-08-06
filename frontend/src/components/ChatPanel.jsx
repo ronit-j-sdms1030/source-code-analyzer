@@ -8,6 +8,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }) => {
   const match = /language-(\w+)/.exec(className || "");
   const lang = match ? match[1] : "";
   const codeText = String(children).replace(/\n$/, "");
+  const isMultiLine = codeText.includes("\n");
 
   if (!inline && lang === "diff") {
     return (
@@ -30,14 +31,22 @@ const CodeBlock = ({ node, inline, className, children, ...props }) => {
     );
   }
   
-  return !inline ? (
-    <pre className={className} style={{ backgroundColor: "#1e1e1e", padding: "12px", borderRadius: "6px", overflowX: "auto", fontSize: "13px", color: "#d4d4d4", lineHeight: "1.5" }}>
-      <code className={className} {...props}>
-        {children}
-      </code>
-    </pre>
-  ) : (
-    <code className={className} style={{ backgroundColor: "rgba(0,0,0,0.1)", padding: "2px 4px", borderRadius: "3px" }} {...props}>
+  // Only render as a full block if it has multiple lines or an explicit language tag.
+  // Otherwise, treat it as an inline snippet even if the markdown parser flagged it as !inline
+  // (which happens when the LLM places backticks on their own lines).
+  if (!inline && (lang || isMultiLine)) {
+    return (
+      <pre className={className} style={{ backgroundColor: "#1e1e1e", padding: "12px", borderRadius: "6px", overflowX: "auto", fontSize: "13px", color: "#d4d4d4", lineHeight: "1.5" }}>
+        <code className={className} {...props}>
+          {children}
+        </code>
+      </pre>
+    );
+  }
+
+  // Inline snippet rendering with a black/dark outline
+  return (
+    <code className={className} style={{ backgroundColor: "var(--bg-panel-raised)", border: "1px solid var(--text-primary)", color: "var(--text-primary)", padding: "2px 6px", borderRadius: "4px", fontSize: "0.9em" }} {...props}>
       {children}
     </code>
   );

@@ -115,6 +115,119 @@ def get_vulnerabilities(project_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ── Language detection from file extension ──────────────────────────────────────
+_EXT_TO_LANG = {
+    ".py": "python", ".js": "javascript", ".jsx": "javascript",
+    ".ts": "typescript", ".tsx": "typescript", ".java": "java",
+    ".go": "go", ".rb": "ruby", ".rs": "rust", ".php": "php",
+    ".c": "c", ".h": "c", ".cpp": "cpp", ".cxx": "cpp", ".cc": "cpp",
+    ".cs": "csharp", ".css": "css", ".html": "xml", ".htm": "xml",
+    ".xml": "xml", ".sh": "bash", ".bash": "bash", ".zsh": "bash",
+    ".yaml": "yaml", ".yml": "yaml", ".json": "json",
+    ".env": "bash", ".toml": "bash", ".tf": "python", ".kt": "java",
+    ".swift": "swift",
+}
+
+def _infer_language(path: str) -> str:
+    import os as _os
+    _, ext = _os.path.splitext(path.lower())
+    return _EXT_TO_LANG.get(ext, "plaintext")
+
+
+@app.get("/projects/<project_id>/file_content")
+@auth_required
+def get_file_content(project_id):
+    """
+    Returns the full (or windowed) content of a source file for the in-app
+    code viewer, along with the vulnerable line range, language, and a
+    staleness indicator.
+
+    Query params:
+      file_path   — relative path within the repo  (required)
+      start_line  — 1-based start of the vulnerable range (required)
+      end_line    — 1-based end   of the vulnerable range (optional)
+    """
+    import os
+    import json
+    import hashlib
+
+    file_path  = request.args.get("file_path", "").strip()
+    start_line = int(request.args.get("start_line", 1))
+    end_line   = int(request.args.get("end_line", start_line))
+
+    if not file_path:
+        return jsonify({"error": "file_path is required"}), 400
+
+    # ── Resolve absolute path ────────────────────────────────────────────────
+    repo_dir  = os.path.join(config.REPOS_DIR, project_id)
+    abs_path  = os.path.normpath(os.path.join(repo_dir, file_path))
+
+    # Path traversal guard
+    if not abs_path.startswith(os.path.realpath(repo_dir)):
+        return jsonify({"error": "Invalid file path"}), 400
+
+    if not os.path.exists(abs_path):
+        return jsonify({
+            "error":  "file_not_found",
+            "detail": f"File '{file_path}' not found. It may have been deleted since the scan.",
+        }), 404
+
+    # ── Try to read the file ─────────────────────────────────────────────────
+    try:
+        with open(abs_path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        return jsonify({"error": "cannot_read", "detail": str(e)}), 500
+
+    # Reject binary files
+    if b"\x00" in raw[:8192]:
+        return jsonify({
+            "error":  "binary_file",
+            "detail": "This file appears to be binary and cannot be displayed.",
+        }), 415
+
+    # Decode — try UTF-8, fall back to latin-1 with replacement
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            content = raw.decode("latin-1")
+        except Exception:
+            return jsonify({
+                "error":  "encoding_error",
+                "detail": "File encoding could not be determined.",
+            }), 415
+
+    # ── Staleness detection ──────────────────────────────────────────────────
+    # Compare current file hash against the hash stored in project meta at
+    # ingest time (written by ingestion.py into the project meta).
+    stale = False
+    try:
+        from src.vectorstore import get_project_meta
+        meta = get_project_meta(project_id) or {}
+        file_hashes = meta.get("file_hashes", {})
+        if file_path in file_hashes:
+            current_hash = hashlib.md5(raw).hexdigest()
+            stale = (current_hash != file_hashes[file_path])
+    except Exception:
+        pass  # non-fatal — just don't show staleness indicator
+
+    language   = _infer_language(file_path)
+    total_lines = content.count("\n") + 1
+
+    return jsonify({
+        "content":    content,
+        "file_path":  file_path,
+        "language":   language,
+        "start_line": start_line,
+        "end_line":   end_line,
+        "total_lines": total_lines,
+        "stale":      stale,
+    })
+
+
+
+
 @app.post("/projects/<project_id>/vulnerabilities/report")
 @auth_required
 def generate_vuln_report(project_id):

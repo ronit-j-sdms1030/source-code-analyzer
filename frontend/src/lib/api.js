@@ -134,3 +134,16 @@ export function logout() {
 export function checkAuth() {
   return request("/api/check_auth");
 }
+
+/**
+ * Fetch full file content for a finding's in-app code viewer.
+ * Returns { content, start_line, end_line, language, file_path, stale }
+ */
+export function getFileContent(projectId, finding) {
+  const filePath  = finding.path ?? finding.file_path ?? "";
+  const startLine = finding.start?.line ?? finding.start_line ?? 1;
+  const endLine   = finding.end?.line   ?? finding.end_line   ?? startLine;
+  const params    = new URLSearchParams({ file_path: filePath, start_line: startLine, end_line: endLine });
+  return request(`/projects/${projectId}/file_content?${params}`);
+}
+

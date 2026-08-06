@@ -12,13 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Ensure SEMGREP_APP_TOKEN is configured
+      - name: Ensure Semgrep OSS is installed
         run: |
-          if [ -z "${{ secrets.SEMGREP_APP_TOKEN }}" ]; then
-            echo "::error::SEMGREP_APP_TOKEN is required but missing. Without it, Semgrep will run unauthenticated and censor secrets."
+          if ! command -v semgrep &> /dev/null; then
+            echo "::error::Semgrep OSS CLI is not installed."
             exit 1
           fi
+          semgrep --version
       - name: Run Semgrep
         run: semgrep scan --config auto
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}

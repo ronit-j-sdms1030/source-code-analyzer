@@ -136,11 +136,26 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
             # Save the fixed relative paths back to disk
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-                
-        return counts
+
+            # ── Persist per-file MD5 hashes for staleness detection ──────────
+            # Stored in project meta as { "file_hashes": { "rel/path": "hex" } }
+            import hashlib as _hashlib
+            file_hashes = {}
+            for abs_p, file_lines in file_cache.items():
+                try:
+                    rel_p = os.path.relpath(abs_p, repo_path)
+                    raw_bytes = "\n".join(file_lines).encode("utf-8", errors="replace")
+                    file_hashes[rel_p] = _hashlib.md5(raw_bytes).hexdigest()
+                except Exception:
+                    pass
+            # Will be merged into project meta by _run_pipeline
+            return counts, file_hashes
+
+        return counts, {}
     except Exception as e:
         print(f"[semgrep error] {e}", flush=True)
-        return {"high": 0, "medium": 0, "low": 0}
+        return {"high": 0, "medium": 0, "low": 0}, {}
+
 
 def rescan_vulnerabilities(project_id: str) -> dict:
     import os
@@ -148,7 +163,7 @@ def rescan_vulnerabilities(project_id: str) -> dict:
     if not os.path.exists(repo_path):
         raise ValueError("Repository files not found on disk. Rescan impossible.")
     
-    vuln_counts = _run_semgrep(project_id, repo_path)
+    vuln_counts, file_hashes = _run_semgrep(project_id, repo_path)
     
     from .vectorstore import get_project_meta, upsert_project_meta
     
@@ -156,11 +171,13 @@ def rescan_vulnerabilities(project_id: str) -> dict:
         project = None
         if project_id in _projects:
             _projects[project_id]["vulnerabilities"] = vuln_counts
+            _projects[project_id]["file_hashes"] = file_hashes
             project = _projects[project_id]
         else:
             project = get_project_meta(project_id)
             if project:
                 project["vulnerabilities"] = vuln_counts
+                project["file_hashes"] = file_hashes
                 
         if project:
             upsert_project_meta(project_id, project)
@@ -213,7 +230,7 @@ def _run_pipeline(project_id: str, url: str, token: str = ""):
         file_tree = _generate_repo_tree(repo_path)
 
         # [3] Semgrep — Scan for vulnerabilities
-        vuln_counts = _run_semgrep(project_id, repo_path)
+        vuln_counts, file_hashes = _run_semgrep(project_id, repo_path)
         _set_stage(project_id, 3)
 
         # [4] Code-aware splitter — chunk by function/class
@@ -237,6 +254,7 @@ def _run_pipeline(project_id: str, url: str, token: str = ""):
             "chunks": len(chunks),
             "file_tree": file_tree,
             "vulnerabilities": vuln_counts,
+            "file_hashes": file_hashes,
             "indexedAt": "just now",
             "messages": [
                 {
