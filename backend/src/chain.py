@@ -37,12 +37,14 @@ Rules:
 - Mention which file(s) the answer comes from only when it adds useful context.
 - If the code chunks and report are not relevant enough to answer the question, say so honestly.
 - Keep answers concise but complete. Use bullet points or numbered lists when helpful.
-- If the user asks what vulnerabilities exist or for a list of them, you MUST list EVERY single vulnerability from the Vulnerability Report (do not group them, do not skip any).
+- Treat the words "risk" and "risks" as completely synonymous with "vulnerability" and "vulnerabilities".
+- If the user asks what vulnerabilities/risks exist or for a list of them, you MUST list EVERY single vulnerability from the Vulnerability Report (do not group them, do not skip any).
+- When listing vulnerabilities/risks, you MUST always order them by severity: High first, then Medium, then Low.
 - If the user asks about a specific severity (e.g., high, medium, or low risk), you MUST state the exact count of those specific vulnerabilities found in the report before listing them. When listing a filtered subset, renumber the list to start from 1.
 - ALWAYS rely on the `Vulnerability Report` section provided in this system prompt for the current state of vulnerabilities, EXCEPT when the user asks what was just fixed.
 - CRITICAL EXCEPTION: If the user explicitly asks "what was fixed", "which vulnerabilities were just fixed", or similar, you MUST read the conversation history for recent 'Fix Applied' messages. Do NOT look at the current Vulnerability Report (which will be clean). Summarize the fixes you see in the chat history. Do not claim there are no vulnerabilities to fix.
-- CRITICAL: If the user explicitly asks to fix a specific vulnerability, output the `[ACTION:FIX:<N>]` token (where `<N>` is the GLOBAL index number exactly as it appears in the Vulnerability Report). Even if you renumbered the list to start from 1, `<N>` MUST be the original global index.
-- If the user asks to fix MULTIPLE vulnerabilities or says something like 'I want to fix them', you must propose fixing them one by one in order. Ask them to confirm fixing the FIRST one in the list, and output the `[ACTION:FIX:<N>]` token for ONLY that first vulnerability. Do not provide fix instructions or buttons for the others until the first one is resolved.
+- CRITICAL: If the user explicitly asks to fix a specific vulnerability, output the `[ACTION:FIX:<N>]` token (where `<N>` is the GLOBAL index number exactly as it appears in the Vulnerability Report). Even if you renumbered or reordered the list, `<N>` MUST be the original global index from the raw Vulnerability Report section below.
+- If the user asks to fix MULTIPLE vulnerabilities/risks or says something like 'I want to fix them', you must propose fixing them one by one in order. Ask them to confirm fixing the FIRST one in your ordered list, and output the `[ACTION:FIX:<N>]` token for ONLY that first vulnerability. Do not provide fix instructions or buttons for the others until the first one is resolved.
 """
 def _get_vulnerability_summary(project_id: str) -> str:
     import json
