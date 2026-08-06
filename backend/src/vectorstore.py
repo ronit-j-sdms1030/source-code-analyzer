@@ -44,6 +44,12 @@ def _client_with_retry():
 def _collection_name(project_id: str) -> str:
     return f"repo_{project_id}"
 
+def _findings_collection_name(project_id: str) -> str:
+    return f"findings_{project_id}"
+
+def _memory_collection_name(project_id: str) -> str:
+    return f"memory_{project_id}"
+
 
 def write_chunks(project_id: str, chunks: list, vectors: list):
     """Writes embedded chunks + metadata (file path, chunk index) to a
@@ -66,6 +72,62 @@ def query_chunks(project_id: str, query_vector: list, top_k: int = 5) -> dict:
     collection = client.get_or_create_collection(_collection_name(project_id))
     return collection.query(query_embeddings=[query_vector], n_results=top_k)
 
+def write_findings(project_id: str, findings: list, vectors: list):
+    """Writes embedded findings to a persisted ChromaDB collection named per repo."""
+    if not findings:
+        return
+    client = _client_with_retry()
+    collection = client.get_or_create_collection(_findings_collection_name(project_id))
+    collection.add(
+        ids=[f["finding_id"] for f in findings],
+        embeddings=vectors,
+        documents=[f["text"] for f in findings],
+        metadatas=[f["metadata"] for f in findings],
+    )
+
+def query_findings(project_id: str, query_vector: list = None, where: dict = None, top_k: int = 5) -> dict:
+    client = _client_with_retry()
+    collection = client.get_or_create_collection(_findings_collection_name(project_id))
+    kwargs = {}
+    if query_vector:
+        kwargs["query_embeddings"] = [query_vector]
+        kwargs["n_results"] = top_k
+    else:
+        kwargs["n_results"] = top_k
+        # Chroma requires query_embeddings or query_texts for query(), but we can use get() for pure metadata lookups
+        if where:
+            res = collection.get(where=where)
+        else:
+            res = collection.get()
+        # Wrap get() results in outer lists to match query() format
+        return {
+            "ids": [res.get("ids", [])],
+            "documents": [res.get("documents", [])],
+            "metadatas": [res.get("metadatas", [])]
+        }
+
+    if where:
+        kwargs["where"] = where
+    return collection.query(**kwargs)
+
+def write_memory(project_id: str, memory_id: str, text: str, vector: list, metadata: dict):
+    client = _client_with_retry()
+    collection = client.get_or_create_collection(_memory_collection_name(project_id))
+    collection.add(
+        ids=[memory_id],
+        embeddings=[vector],
+        documents=[text],
+        metadatas=[metadata]
+    )
+
+def query_memory(project_id: str, query_vector: list, top_k: int = 2) -> dict:
+    client = _client_with_retry()
+    collection = client.get_or_create_collection(_memory_collection_name(project_id))
+    # Check count first to avoid querying empty collection which can error in some chroma versions
+    if collection.count() == 0:
+        return {"documents": [[]], "metadatas": [[]]}
+    return collection.query(query_embeddings=[query_vector], n_results=top_k)
+
 
 def delete_collection(project_id: str):
     client = _client_with_retry()
@@ -73,6 +135,15 @@ def delete_collection(project_id: str):
         client.delete_collection(_collection_name(project_id))
     except Exception:  # noqa: BLE001
         pass
+    try:
+        client.delete_collection(_findings_collection_name(project_id))
+    except Exception:
+        pass
+    try:
+        client.delete_collection(_memory_collection_name(project_id))
+    except Exception:
+        pass
+        
     meta = client.get_or_create_collection(_META_COLLECTION)
     try:
         meta.delete(ids=[project_id])

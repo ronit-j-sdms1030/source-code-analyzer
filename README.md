@@ -6,8 +6,11 @@ running fully on a local stack (Ollama + open-source embeddings).
 See `docs/realtime-source-code-analyzer.md` (or the PDF) for the full
 product write-up. This README covers just the repo layout and how to run it.
 
-## Project Structure
+## Architecture Note: Semgrep Integration
 
+We use the free OSS CLI as our engine, and built our own extraction + LLM verification layer in place of Semgrep's paid Secrets/Assistant features, since our use case falls outside their team-based free tier.
+
+## Project Structure
 ```
 source-code-analyzer/
 ├── backend/

@@ -80,12 +80,23 @@ def ingest_status(project_id):
 @app.post("/chat")
 @auth_required
 def chat():
+    import uuid
     body = request.get_json(force=True)
     project_id = (body or {}).get("projectId")
     question = (body or {}).get("question", "").strip()
+    session_id = (body or {}).get("sessionId", "")
+    
+    if not session_id:
+        session_id = uuid.uuid4().hex
+        
     if not project_id or not question:
         return jsonify({"error": "projectId and question are required"}), 400
-    result = answer_question(project_id, question)
+        
+    result = answer_question(project_id, question, session_id)
+    
+    # Return the session_id to the client so they can include it in future requests
+    result["sessionId"] = session_id
+    
     return jsonify(result)
 
 

@@ -5,25 +5,12 @@ from .embeddings import embed_query
 from .vectorstore import query_chunks
 
 def _get_history(project_id: str) -> list:
-    import json
-    import os
-    path = os.path.join(config.REPORTS_DIR, f"{project_id}_history.json")
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
+    # Deprecated: use memory.py
     return []
 
 def _append_history(project_id: str, message: dict):
-    import json
-    import os
-    history = _get_history(project_id)
-    history.append(message)
-    path = os.path.join(config.REPORTS_DIR, f"{project_id}_history.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(history, f, indent=2)
+    # Deprecated: use memory.py
+    pass
 
 SYSTEM_PROMPT = """\
 You are a Source Code Analyzer and Reviewer, not a large language model. \
@@ -137,34 +124,210 @@ Do not answer the question. Only output the rewritten search query. If the quest
     return rewritten
 
 
-def answer_question(project_id: str, question: str) -> dict:
-    from .vectorstore import get_project_meta
+def answer_question(project_id: str, question: str, session_id: str) -> dict:
+    import time
+    from .vectorstore import get_project_meta, query_findings, query_memory, write_memory, query_chunks
+    from .memory import get_session_history, append_to_session
+    from .intent import classify_intent
+    import uuid
     
-    history = _get_history(project_id)
-    search_query = _rewrite_query(history, question)
+    history = get_session_history(session_id)
+    intent_data = classify_intent(history, question)
     
-    query_vector = embed_query(search_query)
-    results = query_chunks(project_id, query_vector, top_k=5)
+    intent = intent_data.get("intent", "general_code")
+    entities = intent_data.get("entities", {})
+    inferred = intent_data.get("inferred_from_history", [])
+    
+    debug_context = {"intent": intent_data}
+    sources = []
 
-    documents = (results.get("documents") or [[]])[0]
-    metadatas = (results.get("metadatas") or [[]])[0]
-    chunks = [{"text": d, "file_path": m.get("file_path", "unknown")} for d, m in zip(documents, metadatas)]
+    # Build a transparency prefix when the classifier inferred entity values
+    # from session history rather than the current message.
+    def _inference_prefix() -> str:
+        if not inferred:
+            return ""
+        detail_parts = []
+        if "file_path" in inferred and entities.get("file_path"):
+            detail_parts.append(f"`{entities['file_path']}`")
+        if "cwe_or_keyword" in inferred and entities.get("cwe_or_keyword"):
+            detail_parts.append(entities["cwe_or_keyword"])
+        if "line_number" in inferred and entities.get("line_number"):
+            detail_parts.append(f"line {entities['line_number']}")
+        detail = ", ".join(detail_parts) if detail_parts else "some context"
+        return (
+            f"*(Based on our earlier discussion, I inferred {detail} from the "
+            f"conversation history — not from your current message. "
+            f"Let me know if you meant a different finding.)*\n\n"
+        )
+    
+    # 1. Handle Long-Term Memory Save
+    memory_trigger = entities.get("memory_trigger")
+    if memory_trigger:
+        mem_id = uuid.uuid4().hex
+        write_memory(project_id, mem_id, memory_trigger, embed_query(memory_trigger), {"timestamp": time.time(), "session_id": session_id})
+        debug_context["saved_memory"] = memory_trigger
+
+    # 2. Handle Long-Term Memory Retrieve
+    long_term_prefs = ""
+    if entities.get("requires_long_term_memory"):
+        mem_results = query_memory(project_id, embed_query(question), top_k=2)
+        mem_docs = (mem_results.get("documents") or [[]])[0]
+        if mem_docs:
+            long_term_prefs = "User Preferences / Context:\n" + "\n".join(mem_docs)
+            debug_context["retrieved_memory"] = mem_docs
+
+    # 3. Handle Retrieval
+    chunks = []
+    vuln_summary = _get_vulnerability_summary(project_id)
+    
+    if intent == "specific_finding" or intent == "fix_request":
+        where_clause = None
+        if entities.get("finding_id"):
+            where_clause = {"finding_id": entities["finding_id"]}
+        elif entities.get("file_path"):
+            conditions = [{"file_path": {"$eq": entities["file_path"]}}]
+            if entities.get("line_number"):
+                conditions.append({"line_number": {"$eq": entities["line_number"]}})
+            elif entities.get("cwe_or_keyword") and entities["cwe_or_keyword"].startswith("CWE-"):
+                # Only strictly filter by CWE if it looks like a real CWE ID, since keyword won't exact-match cwe_id.
+                conditions.append({"cwe_id": {"$eq": entities["cwe_or_keyword"]}})
+            if len(conditions) > 1:
+                where_clause = {"$and": conditions}
+            else:
+                where_clause = conditions[0]
+                
+        if where_clause:
+            results = query_findings(project_id, where=where_clause)
+            docs = (results.get("documents") or [[]])[0]
+            metas = (results.get("metadatas") or [[]])[0]
+            if not docs:
+                append_to_session(session_id, {"role": "user", "text": question})
+                ans = "I cannot find a finding matching that description."
+                append_to_session(session_id, {"role": "assistant", "text": ans})
+                return {"answer": ans, "sources": [], "debug_context": debug_context}
+            elif len(docs) > 1:
+                # Disambiguate
+                append_to_session(session_id, {"role": "user", "text": question})
+                opts = []
+                for m in metas:
+                    opts.append(f"Line {m.get('line_number')} ({m.get('cwe_id')})")
+                ans = f"There are multiple matching findings in `{entities.get('file_path')}`. Did you mean: " + ", ".join(opts) + "?"
+                append_to_session(session_id, {"role": "assistant", "text": ans})
+                return {"answer": ans, "sources": [], "debug_context": debug_context}
+            else:
+                chunks = [{"text": docs[0], "file_path": metas[0].get("file_path", "unknown")}]
+                debug_context["retrieved_findings"] = metas
+                
+                # If inferred, add to debug_context so frontend can surface this
+                if inferred:
+                    debug_context["inferred_from_history"] = inferred
+                
+                # If intent == fix_request, bypass normal pipeline
+                if intent == "fix_request":
+                    return _handle_fix_request(project_id, question, session_id, history, metas[0], debug_context, _inference_prefix())
+                    
+        else:
+            # Not enough info to filter
+            ans = "Could you please specify the file path or line number for the finding?"
+            append_to_session(session_id, {"role": "user", "text": question})
+            append_to_session(session_id, {"role": "assistant", "text": ans})
+            return {"answer": ans, "sources": [], "debug_context": debug_context}
+            
+    elif intent == "general_findings":
+        where_clause = None if entities.get("include_false_positives") else {"status": {"$ne": "false_positive"}}
+        results = query_findings(project_id, query_vector=embed_query(question), where=where_clause, top_k=5)
+        docs = (results.get("documents") or [[]])[0]
+        metas = (results.get("metadatas") or [[]])[0]
+        chunks = [{"text": d, "file_path": m.get("file_path", "unknown")} for d, m in zip(docs, metas)]
+        debug_context["retrieved_findings"] = metas
+        
+    else:
+        # general_code or compare_scans fallback
+        search_query = _rewrite_query(history, question)
+        results = query_chunks(project_id, embed_query(search_query), top_k=5)
+        docs = (results.get("documents") or [[]])[0]
+        metas = (results.get("metadatas") or [[]])[0]
+        chunks = [{"text": d, "file_path": m.get("file_path", "unknown")} for d, m in zip(docs, metas)]
+        debug_context["retrieved_chunks"] = metas
 
     # Retrieve project metadata to get the file tree
     meta = get_project_meta(project_id)
     file_tree = meta.get("file_tree", "File tree not available.") if meta else "File tree not available."
 
-    vuln_summary = _get_vulnerability_summary(project_id)
-
-    messages = _build_prompt(question, chunks, history, file_tree, vuln_summary)
-
+    # Build prompt
+    prompt_vuln_summary = vuln_summary
+    if long_term_prefs:
+        prompt_vuln_summary += f"\n\n{long_term_prefs}"
+        
+    messages = _build_prompt(question, chunks, history, file_tree, prompt_vuln_summary)
     answer = _call_cloud_llm(messages)
 
-    _append_history(project_id, {"role": "user", "text": question})
-    _append_history(project_id, {"role": "assistant", "text": answer})
+    # Prepend inference transparency notice if any entities came from history
+    prefix = _inference_prefix()
+    if prefix:
+        answer = prefix + answer
+        debug_context["inferred_from_history"] = inferred
+
+    append_to_session(session_id, {"role": "user", "text": question})
+    append_to_session(session_id, {"role": "assistant", "text": answer})
 
     sources = sorted({c["file_path"] for c in chunks})
-    return {"answer": answer, "sources": sources}
+    return {"answer": answer, "sources": sources, "debug_context": debug_context}
+
+def _handle_fix_request(project_id: str, question: str, session_id: str, history: list, finding_meta: dict, debug_context: dict, inference_prefix: str = "") -> dict:
+    from .memory import append_to_session
+    import os
+    import json
+    
+    file_path = finding_meta.get("file_path", "")
+    full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
+    if not os.path.exists(full_path):
+        ans = f"Cannot apply fix: file {file_path} not found on disk."
+        append_to_session(session_id, {"role": "user", "text": question})
+        append_to_session(session_id, {"role": "assistant", "text": ans})
+        return {"answer": ans, "sources": [], "debug_context": debug_context}
+        
+    with open(full_path, "r", encoding="utf-8") as f:
+        file_content = f.read()
+        
+    # Get the full finding details from report
+    report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+    message = finding_meta.get("cwe_id", "Unknown vulnerability")
+    if os.path.exists(report_path):
+        with open(report_path, "r", encoding="utf-8") as f:
+            report_data = json.load(f)
+            for r in report_data.get("results", []):
+                if r.get("path") == file_path and r.get("start", {}).get("line") == finding_meta.get("line_number"):
+                    message = r.get("extra", {}).get("message", message)
+                    break
+                    
+    # Qwen Coder fix generation
+    qwen_sys = """\
+You are an expert Security Engineer. Fix the following vulnerability in the provided file.
+Output a targeted patch or unified diff showing only the specific changes needed, along with a few lines of surrounding context. Do not rewrite the entire file.
+"""
+    qwen_user = f"Vulnerability Message: {message}\nLine Number: {finding_meta.get('line_number')}\n\nFile Content:\n```\n{file_content}\n```"
+    qwen_msg = [{"role": "system", "content": qwen_sys}, {"role": "user", "content": qwen_user}]
+    
+    diff_output = _call_cloud_llm(qwen_msg, model_name=config.CLOUD_FIX_MODEL)
+    
+    # Llama 3.1 8B Summarization
+    llama_sys = """\
+You are a Source Code Analyzer assistant. A dedicated fixing model has just generated a code fix for a vulnerability.
+Explain conversationally to the user how the vulnerability was fixed. Do not output code blocks of the entire file, just summarize the approach.
+"""
+    llama_user = f"Here is the vulnerability: {message}\nHere is the diff of the fix:\n{diff_output}"
+    llama_msg = [{"role": "system", "content": llama_sys}, {"role": "user", "content": llama_user}]
+    
+    llama_summary = _call_cloud_llm(llama_msg)
+    
+    # Combine — prepend inference transparency notice if applicable
+    final_answer = f"{inference_prefix}{llama_summary}\n\n**Proposed Patch:**\n\n{diff_output}"
+    
+    append_to_session(session_id, {"role": "user", "text": question})
+    append_to_session(session_id, {"role": "assistant", "text": final_answer})
+    
+    return {"answer": final_answer, "sources": [file_path], "debug_context": debug_context}
 
 
 def _call_cloud_llm(messages: list, model_name: str = None) -> str:
@@ -181,14 +344,26 @@ def _call_cloud_llm(messages: list, model_name: str = None) -> str:
         "temperature": 0.0,
     }
 
-    resp = requests.post(
-        f"{config.CLOUD_API_URL}/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
+    try:
+        resp = requests.post(
+            f"{config.CLOUD_API_URL}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"[LLM Error] {e}", flush=True)
+        return "I'm sorry, I'm having trouble analyzing the source code right now."
+        
+    try:
+        content = resp.json()["choices"][0]["message"].get("content")
+        if content is None:
+            return ""
+        return content.strip()
+    except Exception as e:
+        print(f"[LLM Error - Parsing Response] {e}\nResponse: {resp.text}", flush=True)
+        return "I'm sorry, I received an invalid response format from the AI."
 
 
 def generate_vulnerability_report(project_id: str, finding: dict) -> str:
@@ -200,7 +375,7 @@ You are writing a professional vulnerability report for a maintainer based on a 
 IMPORTANT: When you detect exposed secrets or hardcoded passwords, you MUST explicitly classify them (e.g., AWS Access Keys, GitHub Tokens, Database Passwords, etc.) and highlight their specific blast radius.
 
 CRITICAL CLASSIFICATION RULES:
-0. FALSE POSITIVE CHECK: If the snippet contains 'INSERT_', 'YOUR_', '<>', 'xxxxxx', 'changeme', or is an empty string, it is a FALSE POSITIVE. You MUST NOT generate a vulnerability report. You MUST ONLY output the phrase `**FALSE POSITIVE**` followed by a one-sentence explanation.
+0. FALSE POSITIVE CHECK: If the snippet contains 'INSERT_', 'YOUR_', '<>', 'xxxxxx', 'changeme', or is an empty string, it is a FALSE POSITIVE. You MUST NOT generate a vulnerability report. You MUST ONLY output the phrase `**FALSE POSITIVE**` followed by a one-sentence explanation. NOTE: If the value is a realistic mock credential matching a valid format (e.g., an AWS key ending in EXAMPLE), you MUST treat it as a real vulnerability, NOT a false positive.
 1. VERIFY FIRST & SHOW EVIDENCE: Do not assume Semgrep is correct. Read the code snippet. If it is a real secret, you MUST quote the exact (redacted) variable name (e.g., `API_KEY=...`) to prove it is a live secret.
 2. CWE ID: Pick the MOST SPECIFIC match based on actual code behavior (e.g., do not confuse CWE-798 Hardcoded Credentials with CWE-200 Sensitive Data Exposure).
 3. CVSS 3.1 & MATH: Calculate the exact CVSS 3.1 vector string by walking through AV, AC, PR, UI, S, C, I, A. Ensure you use the exact keys, for example Scope is `S:C` or `S:U` (NOT `SC:C`). Your numerical score MUST logically and mathematically match the vector. For example, if PR:H (High Privileges Required), you cannot score a 10.0. Ensure your impact logically matches the privileges required.
@@ -268,7 +443,7 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
         f"**Severity:** {severity}\n"
         f"**Message:** {message}\n\n"
         f"**Code Snippet:**\n```\n{code_snippet}\n```\n\n"
-        f"Remember to classify this correctly. If it is an obvious placeholder or dummy value, strictly output ONLY a FALSE POSITIVE paragraph as instructed."
+        f"Evaluate the snippet. If it is a real vulnerability, use the 10-point structure. If it is an obvious dummy/placeholder, strictly output the FALSE POSITIVE paragraph."
     )
 
     messages = [
