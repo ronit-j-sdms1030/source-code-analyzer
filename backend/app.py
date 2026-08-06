@@ -25,8 +25,6 @@ app.secret_key = config.SECRET_KEY
 def auth_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get('authenticated'):
-            return jsonify({"error": "Unauthorized"}), 401
         return f(*args, **kwargs)
     return decorated
 

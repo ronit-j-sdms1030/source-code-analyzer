@@ -99,32 +99,10 @@ export default function SourceCodeAnalyzer() {
     return () => window.removeEventListener("unauthorized", handleAuthError);
   }, []);
 
-  // Check auth and load projects on mount
+  // Bypass auth and load projects on mount
   useEffect(() => {
-    checkAuth()
-      .then((res) => {
-        if (res.authenticated) {
-          setIsAuthenticated(true);
-          loadProjects();
-        } else {
-          // Autologin for development
-          login("stark123")
-            .then(() => {
-              setIsAuthenticated(true);
-              loadProjects();
-            })
-            .catch(() => setIsAuthenticated(false));
-        }
-      })
-      .catch(() => {
-        // Autologin for development fallback
-        login("stark123")
-          .then(() => {
-            setIsAuthenticated(true);
-            loadProjects();
-          })
-          .catch(() => setIsAuthenticated(false));
-      });
+    setIsAuthenticated(true);
+    loadProjects();
   }, []);
 
   const loadProjects = () => {
@@ -227,22 +205,7 @@ export default function SourceCodeAnalyzer() {
     }));
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      setIsAuthenticated(false);
-    } catch (err) {
-      console.error("Failed to logout", err);
-    }
-  };
 
-  if (isAuthenticated === null) {
-    return <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-void)", color: "var(--text-tertiary)" }}>Loading...</div>;
-  }
-
-  if (isAuthenticated === false) {
-    return <Login onLogin={() => { setIsAuthenticated(true); loadProjects(); }} />;
-  }
 
   return (
     <div className="app" data-theme={theme}>
@@ -269,15 +232,6 @@ export default function SourceCodeAnalyzer() {
               <span className="theme-toggle-thumb" />
             </span>
           </button>
-          
-          <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid var(--border-hair)', paddingLeft: '16px' }}>
-            <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
-              AD
-            </div>
-            <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}>
-              Logout
-            </button>
-          </div>
         </div>
       </header>
 
