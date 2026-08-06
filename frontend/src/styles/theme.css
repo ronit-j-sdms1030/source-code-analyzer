@@ -334,7 +334,7 @@ body { margin: 0; padding: 0; }
 .markdown-body code { background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 0.9em; }
 .markdown-body pre { background: var(--bg-void); padding: 12px; border-radius: 6px; overflow-x: auto; margin-bottom: 12px; border: 1px solid var(--border-hair); }
 .markdown-body pre code { background: none; padding: 0; border-radius: 0; }
-.markdown-body strong { color: var(--text-primary); font-weight: 700; }
+.markdown-body strong { color: var(--text-primary); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   .rail-node.active::before, .thinking .dot { animation: none; }
