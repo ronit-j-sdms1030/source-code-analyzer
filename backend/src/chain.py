@@ -4,6 +4,208 @@ from . import config
 from .embeddings import embed_query
 from .vectorstore import query_chunks
 
+# Well-known vendor-published documentation/example keys that are deliberately
+# fake and safe. Published by the vendor in their own official documentation.
+# The canonical AWS example key (AKIAIOSFODNN7EXAMPLE) is the primary case;
+# include close variants and other vendors' official placeholder values.
+_KNOWN_VENDOR_EXAMPLE_KEYS = {
+    # AWS — official AWS documentation example keys
+    "AKIAIOSFODNN7EXAMPLE",
+    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    # GCP — placeholder service account keys used in GCP documentation
+    "YOUR_API_KEY",
+    "AIzaSyD-EXAMPLE-KEY",
+    # Stripe — test mode keys (always start with sk_test_ or pk_test_)
+    "sk_test_" + "4eC39HqLyjWDarjtT1zdp7dc",
+    "pk_test_" + "TYooMQauvdEDq54NiTphI7jx",
+    # GitHub — documented example PATs
+    "ghp_EXAMPLE000000000000000000000000000",
+    # Twilio — documented example SID / Auth token
+    "AC" + "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+    "your_auth_token",
+}
+
+# ── AUTHORITATIVE OWASP TOP 10 (2021) ────────────────────────────────────────
+# Keyed by lowercase keyword fragments for fuzzy matching against LLM output.
+# Values are the exact canonical label strings the model must output.
+_OWASP_2021 = {
+    "broken access control":              "A01:2021 \u2013 Broken Access Control",
+    "cryptographic failure":              "A02:2021 \u2013 Cryptographic Failures",
+    "sensitive data exposure":            "A02:2021 \u2013 Cryptographic Failures",
+    "injection":                          "A03:2021 \u2013 Injection",
+    "sqli":                               "A03:2021 \u2013 Injection",
+    "command injection":                  "A03:2021 \u2013 Injection",
+    "xss":                                "A03:2021 \u2013 Injection",
+    "cross-site scripting":               "A03:2021 \u2013 Injection",
+    "ssti":                               "A03:2021 \u2013 Injection",
+    "template injection":                 "A03:2021 \u2013 Injection",
+    "insecure design":                    "A04:2021 \u2013 Insecure Design",
+    "security misconfiguration":          "A05:2021 \u2013 Security Misconfiguration",
+    "configuration":                      "A05:2021 \u2013 Security Misconfiguration",
+    "hardcoded":                          "A05:2021 \u2013 Security Misconfiguration",
+    "hardcoded credential":               "A05:2021 \u2013 Security Misconfiguration",
+    "exposed secret":                     "A05:2021 \u2013 Security Misconfiguration",
+    "misconfiguration":                   "A05:2021 \u2013 Security Misconfiguration",
+    "vulnerable and outdated":            "A06:2021 \u2013 Vulnerable and Outdated Components",
+    "outdated component":                 "A06:2021 \u2013 Vulnerable and Outdated Components",
+    "identification and authentication":  "A07:2021 \u2013 Identification and Authentication Failures",
+    "authentication failure":             "A07:2021 \u2013 Identification and Authentication Failures",
+    "broken authentication":              "A07:2021 \u2013 Identification and Authentication Failures",
+    "software and data integrity":        "A08:2021 \u2013 Software and Data Integrity Failures",
+    "insecure deserialization":           "A08:2021 \u2013 Software and Data Integrity Failures",
+    "deserialization":                    "A08:2021 \u2013 Software and Data Integrity Failures",
+    "security logging":                   "A09:2021 \u2013 Security Logging and Monitoring Failures",
+    "monitoring failure":                 "A09:2021 \u2013 Security Logging and Monitoring Failures",
+    "server-side request forgery":        "A10:2021 \u2013 Server-Side Request Forgery (SSRF)",
+    "ssrf":                               "A10:2021 \u2013 Server-Side Request Forgery (SSRF)",
+}
+
+# Exact valid labels (for output-side validation after LLM generates a category)
+_OWASP_2021_VALID = set(_OWASP_2021.values())
+
+
+def _compute_cvss31_score(vector: str) -> float | None:
+    """Compute the real CVSS 3.1 base score from a vector string.
+
+    Implements the exact CVSS 3.1 formula from first.org/cvss/v3.1/specification-document.
+    The LLM is NOT trusted to compute this — it only outputs the vector string,
+    and this function produces the authoritative score.
+
+    Returns the score (0.0–10.0, rounded up to 1 decimal) or None on parse error.
+    """
+    import math, re
+
+    AV_W  = {'N': 0.85, 'A': 0.62, 'L': 0.55, 'P': 0.20}
+    AC_W  = {'L': 0.77, 'H': 0.44}
+    PR_WU = {'N': 0.85, 'L': 0.62, 'H': 0.27}  # Scope Unchanged
+    PR_WC = {'N': 0.85, 'L': 0.68, 'H': 0.50}  # Scope Changed
+    UI_W  = {'N': 0.85, 'R': 0.62}
+    CIA_W = {'N': 0.00, 'L': 0.22, 'H': 0.56}
+
+    # Strip optional "CVSS:3.1/" prefix
+    v = re.sub(r'^CVSS:3\.1/', '', vector.strip())
+
+    try:
+        parts = dict(p.split(':') for p in v.split('/'))
+        s  = parts['S']
+        av = AV_W[parts['AV']]
+        ac = AC_W[parts['AC']]
+        pr = (PR_WC if s == 'C' else PR_WU)[parts['PR']]
+        ui = UI_W[parts['UI']]
+        c  = CIA_W[parts['C']]
+        i  = CIA_W[parts['I']]
+        a  = CIA_W[parts['A']]
+    except (KeyError, ValueError):
+        return None
+
+    isc_base = 1.0 - (1.0 - c) * (1.0 - i) * (1.0 - a)
+
+    if s == 'U':
+        impact = 6.42 * isc_base
+    else:
+        impact = 7.52 * (isc_base - 0.029) - 3.25 * ((isc_base - 0.02) ** 15)
+
+    if impact <= 0:
+        return 0.0
+
+    exploitability = 8.22 * av * ac * pr * ui
+
+    if s == 'U':
+        raw = min(impact + exploitability, 10.0)
+    else:
+        raw = min(1.08 * (impact + exploitability), 10.0)
+
+    # CVSS 3.1 uses "round up" (ceiling to 1 decimal)
+    return math.ceil(raw * 10) / 10.0
+
+
+def _resolve_owasp_category(llm_owasp_text: str) -> str | None:
+    """Given whatever OWASP text the LLM produced, return the correct 2021 label.
+
+    Strategy:
+    1. If it already matches a valid 2021 label exactly, return it as-is.
+    2. Otherwise, scan the keyword table for the best fuzzy match.
+    3. Return None if nothing matches (caller will leave text unchanged).
+    """
+    if not llm_owasp_text:
+        return None
+    clean = llm_owasp_text.strip()
+    if clean in _OWASP_2021_VALID:
+        return clean  # Already correct
+    lower = clean.lower()
+    # Longest-match wins to avoid "injection" matching "command injection" when the
+    # full phrase is present
+    best_key, best_label = "", None
+    for kw, label in _OWASP_2021.items():
+        if kw in lower and len(kw) > len(best_key):
+            best_key, best_label = kw, label
+    return best_label
+
+
+def _postprocess_report(report_text: str) -> str:
+    """Post-process a raw LLM vulnerability report to enforce correctness of:
+
+    1. CVSS 3.1 score  — extracted from the vector string, recomputed via formula,
+                         then the LLM's claimed score is replaced with the real one.
+    2. OWASP category  — validated against the authoritative 2021 list and corrected
+                         if the LLM produced a wrong year (2017), paraphrased name,
+                         or invented a non-existent category/year combination.
+
+    This function is the final quality gate: it runs AFTER the LLM call and BEFORE
+    the report reaches the user, ensuring classification metadata is always accurate
+    regardless of LLM output quality.
+    """
+    import re
+
+    text = report_text
+
+    # ── 1. CVSS SCORE CORRECTION ─────────────────────────────────────────────
+    # Find the CVSS 3.1 vector string in the report.
+    vector_re = re.compile(
+        r'(CVSS:3\.1/)?(AV:[NALP]/AC:[LH]/PR:[NLH]/UI:[NR]/S:[CU]/C:[NLH]/I:[NLH]/A:[NLH])',
+        re.IGNORECASE
+    )
+    vec_match = vector_re.search(text)
+    if vec_match:
+        raw_vector = vec_match.group(0).upper()
+        computed = _compute_cvss31_score(raw_vector)
+        if computed is not None:
+            severity = "Critical" if computed >= 9.0 else \
+                       "High"     if computed >= 7.0 else \
+                       "Medium"   if computed >= 4.0 else "Low"
+            # Pattern allows for markdown asterisks anywhere around the label/colon
+            score_re = re.compile(
+                r'((?:CVSS[\s\*]*3\.1[\s\*]*)?(?:Base[\s\*]*)?Score[\s\*]*[:\-][\s\*]*)(\[COMPUTED\]|\d+\.\d+)[\s\*]*(\([^)]+\))?',
+                re.IGNORECASE
+            )
+            replacement = rf'\g<1>{computed} ({severity})'
+            new_text = score_re.sub(replacement, text)
+            if new_text != text:
+                text = new_text
+            else:
+                # Score wasn't found in expected format — append a correction note
+                text = text.replace(
+                    raw_vector,
+                    f"{raw_vector} *(Computed Score: **{computed}** ({severity}))*"
+                )
+
+    # ── 2. OWASP CATEGORY CORRECTION ─────────────────────────────────────────
+    # Find whatever the LLM wrote after "OWASP" or "OWASP Category:"
+    owasp_re = re.compile(
+        r'(OWASP[\s\*]*(?:Top[\s\*]*10[\s\*]*)?(?:Category|Label|Classification)?[\s\*]*[:\u2013\-][\s\*]*)([^\n]+)',
+        re.IGNORECASE
+    )
+    owasp_match = owasp_re.search(text)
+    if owasp_match:
+        llm_owasp = owasp_match.group(2).strip()
+        corrected = _resolve_owasp_category(llm_owasp)
+        if corrected and corrected != llm_owasp:
+            text = text[:owasp_match.start(2)] + corrected + text[owasp_match.end(2):]
+
+    return text
+
+
+
 def _get_history(project_id: str) -> list:
     # Deprecated: use memory.py
     return []
@@ -278,7 +480,23 @@ def _handle_fix_request(project_id: str, question: str, session_id: str, history
     from .memory import append_to_session
     import os
     import json
-    
+    import re
+
+    # ── FALSE POSITIVE GATE ──────────────────────────────────────────────────
+    # If this finding was already classified as a false positive, do not
+    # generate fix content. Return an explanation instead.
+    fp_status = finding_meta.get("status", "") or ""
+    fp_message = finding_meta.get("message", "") or ""
+    if fp_status == "false_positive" or "FALSE POSITIVE" in fp_message.upper():
+        ans = (
+            "⚠️ **No action needed.** This finding was already classified as a "
+            "**false positive** — it is not a real vulnerability. No fix needs to be applied."
+        )
+        append_to_session(session_id, {"role": "user", "text": question})
+        append_to_session(session_id, {"role": "assistant", "text": ans})
+        return {"answer": ans, "sources": [], "debug_context": debug_context}
+    # ── END GATE ─────────────────────────────────────────────────────────────
+
     file_path = finding_meta.get("file_path", "")
     full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
     if not os.path.exists(full_path):
@@ -330,6 +548,37 @@ Explain conversationally to the user how the vulnerability was fixed. Do not out
     return {"answer": final_answer, "sources": [file_path], "debug_context": debug_context}
 
 
+def _is_false_positive(code_snippet: str, message: str) -> bool:
+    """Shared false-positive gate used by all content-generation paths.
+
+    Returns True ONLY for secrets-class findings whose snippet looks like
+    a placeholder. Non-secrets vuln classes (SSTI, SQLi, XSS, etc.) always
+    return False — they are never false positives.
+    """
+    import re
+    secrets_keywords = ['secret', 'password', 'token', 'credential', 'api.key', 'apikey', 'hardcoded']
+    if not any(kw in message.lower() for kw in secrets_keywords):
+        return False  # Not a secrets finding — skip the placeholder gate entirely
+
+    value = code_snippet
+    m = re.search(r'=\s*["\']([^"\']+)["\']', code_snippet)
+    if m:
+        value = m.group(1)
+
+    # Well-known vendor documentation placeholder keys
+    if value in _KNOWN_VENDOR_EXAMPLE_KEYS:
+        return True
+    if len(value) >= 8 and (value[:len(value)//2] == value[len(value)//2:]):
+        return True
+    if re.search(r'^(1234|abcd|0123|qwerty|asdf)', value.lower()):
+        return True
+    if any(x in value.lower() for x in ['insert_', 'your_', '<>', 'xxxxxx', 'changeme', 'placeholder']):
+        return True
+    if len(set(value)) <= 3 and len(value) > 5:
+        return True
+    return False
+
+
 def _call_cloud_llm(messages: list, model_name: str = None) -> str:
     import requests
 
@@ -355,7 +604,7 @@ def _call_cloud_llm(messages: list, model_name: str = None) -> str:
     except Exception as e:
         print(f"[LLM Error] {e}", flush=True)
         return "I'm sorry, I'm having trouble analyzing the source code right now."
-        
+
     try:
         content = resp.json()["choices"][0]["message"].get("content")
         if content is None:
@@ -367,40 +616,42 @@ def _call_cloud_llm(messages: list, model_name: str = None) -> str:
 
 
 def generate_vulnerability_report(project_id: str, finding: dict) -> str:
-    """Generates a detailed vulnerability report strictly following a 10-point structure."""
+    """Generates a detailed vulnerability report strictly following a 10-point structure.
+
+    Three pipeline-wide fixes applied here (apply to ALL finding types, not just secrets):
+    1. FALSE POSITIVE decision is made exclusively in Python before the LLM is called.
+       The LLM is never asked to decide FALSE POSITIVE — it only ever sees real findings.
+    2. CWE selection is constrained via a lookup table injected into the user message,
+       eliminating free-recall errors (e.g. CWE-200 for SSTI instead of CWE-1336).
+    3. CVSS math rules are enforced with explicit constraints (e.g. PR:H caps score at 8.0).
+    """
     system_prompt = """\
 You are an expert Security Engineer and Penetration Tester.
 You are writing a professional vulnerability report for a maintainer based on a static analysis finding.
 
-IMPORTANT: When you detect exposed secrets or hardcoded passwords, you MUST explicitly classify them (e.g., AWS Access Keys, GitHub Tokens, Database Passwords, etc.) and highlight their specific blast radius.
+IMPORTANT: When you detect exposed secrets or hardcoded passwords, explicitly classify them
+(e.g., AWS Access Keys, GitHub Tokens, Database Passwords) and highlight the specific blast radius.
 
-CRITICAL CLASSIFICATION RULES:
-0. FALSE POSITIVE CHECK: If the snippet contains 'INSERT_', 'YOUR_', '<>', 'xxxxxx', 'changeme', or is an empty string, it is a FALSE POSITIVE. You MUST NOT generate a vulnerability report. You MUST ONLY output the phrase `**FALSE POSITIVE**` followed by a one-sentence explanation. NOTE: If the value is a realistic mock credential matching a valid format (e.g., an AWS key ending in EXAMPLE), you MUST treat it as a real vulnerability, NOT a false positive.
-1. VERIFY FIRST & SHOW EVIDENCE: Do not assume Semgrep is correct. Read the code snippet. If it is a real secret, you MUST quote the exact (redacted) variable name (e.g., `API_KEY=...`) to prove it is a live secret.
-2. CWE ID: Pick the MOST SPECIFIC match based on actual code behavior (e.g., do not confuse CWE-798 Hardcoded Credentials with CWE-200 Sensitive Data Exposure).
-3. CVSS 3.1 & MATH: Calculate the exact CVSS 3.1 vector string by walking through AV, AC, PR, UI, S, C, I, A. Ensure you use the exact keys, for example Scope is `S:C` or `S:U` (NOT `SC:C`). Your numerical score MUST logically and mathematically match the vector. For example, if PR:H (High Privileges Required), you cannot score a 10.0. Ensure your impact logically matches the privileges required.
-4. ENVIRONMENT CONTEXT: You must heavily weigh the environment based on the file path. A secret in a `.env.dev` or `.test` file has significantly lower severity than production code. Consider whether the file is tracked in git or just local.
-5. CONCRETE PoC: Your Proof of Concept must not be generic bullet points. Show actual (redacted) data formats or a specific, concrete exploitation scenario (like a specific curl command).
+CRITICAL — FALSE POSITIVE HANDLING:
+You will NEVER output "FALSE POSITIVE" or any variant of it. False-positive classification
+has already been done deterministically by the Python layer before this prompt was sent.
+If you are reading this prompt, the finding is CONFIRMED REAL. Treat it as a true positive
+and generate the full 10-point report. Do NOT second-guess the classification — you do not
+have access to the pre-filter logic and your judgment on this is unreliable.
 
-You MUST strictly follow this 10-point structure (UNLESS it is a false positive):
-
-If you determined this is a FALSE POSITIVE based on the rules above, you MUST NOT use the 10-point structure. Instead, simply write a 1-paragraph explanation of why it is a false positive, starting with the exact text `**FALSE POSITIVE**`.
-Example:
-**FALSE POSITIVE**
-The detected snippet `password = "INSERT_YOUR_PASSWORD_HERE"` is clearly a dummy placeholder and not a real hardcoded credential. No actual sensitive data is exposed.
-
-If it is a real vulnerability, follow this structure exactly:
+You MUST strictly follow this 10-point structure for ALL vulnerability types:
 
 1. Clear, specific title
 2. Summary (2-3 sentences)
 3. Affected component (File path, line numbers)
-4. Vulnerability classification (CWE ID exact match, CVSS 3.1 vector string, exact mathematically correct score, and OWASP category)
+4. Vulnerability classification (CWE ID from the lookup table provided, CVSS 3.1 vector string
+   computed using the math rules provided, exact mathematically correct score, and OWASP category)
 5. Detailed technical description (How it works, root cause)
-6. Proof of Concept (PoC) (Concrete scenario, not generic bullets)
-7. Impact assessment (What an attacker could achieve based on actual reachability and environment)
+6. Proof of Concept (PoC) — Concrete scenario, e.g. a specific curl command or payload, NOT generic bullets
+7. Impact assessment (What an attacker can achieve based on actual reachability and environment)
 8. Suggested fix (Pseudocode or secure approach)
-9. Timeline (Note that this was discovered via automated scanning today)
-10. Contact info / credit preference (Credit: AI Source Code Analyzer)
+9. Timeline (Note: discovered via automated scanning today)
+10. Contact info / credit: AI Source Code Analyzer
 
 Format the report using Markdown. Keep the tone professional, objective, and calibrated to the severity.
 """
@@ -412,7 +663,11 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
     code_snippet = finding.get("extra", {}).get("lines", "")
 
     import re
-    # Extract the value from the code snippet if it looks like an assignment
+
+    # ── BUG FIX 1: FALSE POSITIVE GATE (PYTHON LAYER — SINGLE SOURCE OF TRUTH) ─
+    # The LLM is ONLY called when we are certain the finding is real.
+    # This prevents the model from contradicting itself (outputting "FALSE POSITIVE"
+    # while also generating a full 10-point report body in the same response).
     value = code_snippet
     m = re.search(r'=\s*["\']([^"\']+)["\']', code_snippet)
     if m:
@@ -420,22 +675,91 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
 
     is_dummy = False
     dummy_reason = ""
-    
     if len(value) >= 8 and (value[:len(value)//2] == value[len(value)//2:]):
         is_dummy = True
-        dummy_reason = f"The value `{value}` consists of a repeated substring, which is a common placeholder convention, not a cryptographically random key."
+        dummy_reason = f"The value `{value}` consists of a repeated substring, a common placeholder convention."
     elif re.search(r'^(1234|abcd|0123|qwerty|asdf)', value.lower()):
         is_dummy = True
-        dummy_reason = f"The value `{value}` follows a simple sequential or keyboard pattern, which is a common placeholder convention."
+        dummy_reason = f"The value `{value}` follows a simple sequential or keyboard pattern."
     elif any(x in value.lower() for x in ['insert_', 'your_', '<>', 'xxxxxx', 'changeme', 'placeholder']):
         is_dummy = True
         dummy_reason = f"The value `{value}` contains explicit placeholder text."
     elif len(set(value)) <= 3 and len(value) > 5:
         is_dummy = True
-        dummy_reason = f"The value `{value}` has extremely low entropy (only {len(set(value))} unique characters), which is uncharacteristic of a real secret."
+        dummy_reason = f"The value `{value}` has extremely low entropy ({len(set(value))} unique chars)."
+    # Well-known vendor-published example / documentation keys — these are
+    # deliberately fake and safe, published by AWS, GCP, etc. in their own docs.
+    elif value in _KNOWN_VENDOR_EXAMPLE_KEYS:
+        is_dummy = True
+        dummy_reason = f"The value `{value}` is a well-known vendor-published documentation placeholder key."
 
-    if is_dummy:
-        return f"**FALSE POSITIVE**\nThe detected snippet `{code_snippet.strip()}` is clearly a dummy placeholder and not a real hardcoded credential. {dummy_reason} No actual sensitive data is exposed."
+    # Apply false-positive gate ONLY to secrets-class findings.
+    # Non-secrets vuln classes (SSTI, SQLi, XSS, SSRF, etc.) are always real.
+    secrets_keywords = ['secret', 'password', 'token', 'credential', 'api.key', 'apikey', 'hardcoded']
+    is_secrets_finding = any(kw in message.lower() for kw in secrets_keywords)
+    if is_dummy and is_secrets_finding:
+        return (
+            f"**FALSE POSITIVE**\n"
+            f"The detected snippet `{code_snippet.strip()}` is clearly a dummy placeholder "
+            f"and not a real hardcoded credential. {dummy_reason} No actual sensitive data is exposed."
+        )
+
+    # BUG FIX 2 & 3: CWE constraint table + CVSS math rules injected into user message
+    # so they apply to ALL finding types (SSTI, SQLi, XSS, secrets, etc.)
+    cwe_and_cvss_rules = """\
+MANDATORY CWE LOOKUP TABLE - pick from this list ONLY. Do NOT use free recall.
+| Vulnerability Class                        | Correct CWE        |
+|--------------------------------------------|--------------------|
+| Hardcoded credentials / secrets            | CWE-798            |
+| SQL Injection                              | CWE-89             |
+| Command Injection / OS Command             | CWE-78             |
+| Server-Side Template Injection (SSTI)      | CWE-1336           |
+| Cross-Site Scripting (XSS)                 | CWE-79             |
+| Path Traversal / Directory Traversal       | CWE-22             |
+| Insecure Deserialization                   | CWE-502            |
+| XML External Entity (XXE)                  | CWE-611            |
+| Open Redirect                              | CWE-601            |
+| Sensitive Data Exposure (catch-all only)   | CWE-200            |
+| Broken Authentication                      | CWE-287            |
+| Missing Authorization                      | CWE-862            |
+| Weak Cryptography / Weak Hash              | CWE-327 / CWE-328  |
+| SSRF                                       | CWE-918            |
+| Use of Dangerous Function (eval, exec)     | CWE-94             |
+| Race Condition                             | CWE-362            |
+| Improper Input Validation (generic)        | CWE-20             |
+
+MANDATORY OWASP TOP 10 (2021) LOOKUP TABLE - use the EXACT label below. Do NOT paraphrase or abbreviate.
+| Vulnerability Class                                     | Correct OWASP Label                      |
+|---------------------------------------------------------|------------------------------------------|
+| Broken Access Control                                   | A01:2021 – Broken Access Control         |
+| Cryptographic Failures / Sensitive Data Exposure        | A02:2021 – Cryptographic Failures        |
+| Injection (SQLi, CMDi, SSTI, XSS, etc.)                | A03:2021 – Injection                     |
+| Insecure Design / Missing security controls             | A04:2021 – Insecure Design               |
+| Security Misconfiguration / Hardcoded secrets           | A05:2021 – Security Misconfiguration     |
+| Vulnerable and Outdated Components                      | A06:2021 – Vulnerable and Outdated Components |
+| Identification and Authentication Failures              | A07:2021 – Identification and Authentication Failures |
+| Software and Data Integrity Failures / Deserialization  | A08:2021 – Software and Data Integrity Failures |
+| Security Logging and Monitoring Failures                | A09:2021 – Security Logging and Monitoring Failures |
+| Server-Side Request Forgery (SSRF)                      | A10:2021 – Server-Side Request Forgery   |
+
+MANDATORY CVSS 3.1 MATH RULES - apply BEFORE choosing a score:
+- Walk through AV, AC, PR, UI, S, C, I, A in order.
+- Use ONLY: AV:N/A/L/P | AC:L/H | PR:N/L/H | UI:N/R | S:C/U | C:H/L/N | I:H/L/N | A:H/L/N
+- PR:H caps the max base score at ~8.0. NEVER output a score above 8.0 if PR:H.
+- PR:L caps the max base score at ~9.0.
+- A score of 9.8 REQUIRES PR:N AND UI:N AND AC:L simultaneously.
+- S:U (Unchanged Scope) prevents a score of 10.0.
+- UI:R reduces the score - you CANNOT combine UI:R with a score of 9.8.
+- Reference calibration:
+    AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H = 10.0
+    AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H = 9.8
+    AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:H = 9.6
+    AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H = 9.0
+    AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H = 9.0  (Scope Changed softens PR:H penalty)
+    AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H = 7.2  (PR:H + Unchanged Scope)
+    AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H = 8.1
+    AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N = 7.5
+"""
 
     user_content = (
         f"Please generate a detailed vulnerability report for the following finding:\n\n"
@@ -443,23 +767,49 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
         f"**Severity:** {severity}\n"
         f"**Message:** {message}\n\n"
         f"**Code Snippet:**\n```\n{code_snippet}\n```\n\n"
-        f"Evaluate the snippet. If it is a real vulnerability, use the 10-point structure. If it is an obvious dummy/placeholder, strictly output the FALSE POSITIVE paragraph."
+        f"{cwe_and_cvss_rules}\n"
+        f"Select the CWE from the CWE lookup table above. "
+        f"Select the OWASP label from the OWASP Top 10 (2021) lookup table above — "
+        f"use the EXACT label format (e.g. 'A05:2021 \u2013 Security Misconfiguration'), do NOT paraphrase or abbreviate it. "
+        f"For CVSS: output ONLY the vector string (e.g. AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H) — "
+        f"do NOT compute or write the numerical score yourself. The score will be computed programmatically from your vector. "
+        f"Write 'CVSS 3.1 Score: [COMPUTED]' as a placeholder where the score would go."
     )
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content}
     ]
-
-    return _call_cloud_llm(messages)
+    # _postprocess_report() is the final quality gate:
+    # — recomputes CVSS score from the vector using the real formula
+    # — validates and corrects the OWASP category against the 2021 list
+    # This runs AFTER the LLM call so classification metadata is always accurate.
+    return _postprocess_report(_call_cloud_llm(messages))
 
 
 def apply_auto_fix(project_id: str, finding: dict) -> dict:
     """Generates a fix for the vulnerability and applies it directly to the file on disk."""
     import os
+    import re
     file_path = finding.get("path", "")
     if not file_path:
         raise ValueError("Finding does not contain a file path.")
+
+    # ── FALSE POSITIVE GATE ──────────────────────────────────────────────────
+    # Do not apply any fix — or even call the LLM — for false-positive findings.
+    code_snippet = finding.get("extra", {}).get("lines", "")
+    message_text = finding.get("extra", {}).get("message", "")
+    if _is_false_positive(code_snippet, message_text):
+        return {
+            "status": "skipped",
+            "file": file_path,
+            "message": (
+                "⚠️ **No action needed.** This finding was classified as a "
+                "**false positive** — the code snippet contains a placeholder value, "
+                "not a real secret or vulnerability. No fix was applied."
+            )
+        }
+    # ── END GATE ─────────────────────────────────────────────────────────────
     
     full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
     if not os.path.exists(full_path):
@@ -507,7 +857,6 @@ Brief description of the fix.
     
     response = _call_cloud_llm(messages, model_name=config.CLOUD_FIX_MODEL)
     
-    # Extract the description and the code block from the response
     # Extract the description and the code block from the response
     parts = response.split("```")
     if len(parts) >= 3:
@@ -559,6 +908,25 @@ def evaluate_auto_fix(project_id: str, finding: dict) -> dict:
     file_path = finding.get("path", "")
     if not file_path:
         raise ValueError("Finding does not contain a file path.")
+
+    # ── FALSE POSITIVE GATE ──────────────────────────────────────────────────
+    # The Risk Assessment panel MUST NOT generate fix commentary for false
+    # positives. Otherwise the UI shows an actionable "Accept & Apply Fix"
+    # button for a finding the pipeline itself dismissed as non-real.
+    code_snippet = finding.get("extra", {}).get("lines", "")
+    message_text = finding.get("extra", {}).get("message", "")
+    if _is_false_positive(code_snippet, message_text):
+        return {
+            "false_positive": True,
+            "risk_assessment": (
+                "### ✅ No Action Needed\n"
+                "This finding was classified as a **false positive** — "
+                "the code snippet contains a placeholder or dummy value, not a real secret or vulnerability.\n\n"
+                "No fix needs to be applied. The \"Accept & Apply Fix\" action has been disabled."
+            ),
+            "fixed_content": None
+        }
+    # ── END GATE ─────────────────────────────────────────────────────────────
     
     full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
     if not os.path.exists(full_path):

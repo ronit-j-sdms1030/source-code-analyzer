@@ -219,6 +219,18 @@ def apply_evaluated_fix(project_id):
     
     if not finding or not fixed_content:
         return jsonify({"error": "finding and fixed_content are required"}), 400
+
+    # ── FALSE POSITIVE GATE ────────────────────────────────────────────────────
+    # Prevent disk writes when fixed_content is None (returned by evaluate_auto_fix
+    # for false-positive findings) or when the finding itself is a placeholder.
+    from src.chain import _is_false_positive
+    code_snippet = (finding.get("extra") or {}).get("lines", "")
+    message_text = (finding.get("extra") or {}).get("message", "")
+    if not fixed_content or _is_false_positive(code_snippet, message_text):
+        return jsonify({
+            "error": "This finding was classified as a false positive. No fix was applied."
+        }), 400
+    # ── END GATE ───────────────────────────────────────────────────────────────
         
     try:
         file_path = finding.get("path", "")
