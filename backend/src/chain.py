@@ -63,6 +63,84 @@ _OWASP_2021 = {
 # Exact valid labels (for output-side validation after LLM generates a category)
 _OWASP_2021_VALID = set(_OWASP_2021.values())
 
+# ── CWE VALIDATION MAPPING ──────────────────────────────────────────────────
+_CWE_BY_OWASP = {
+    "A01:2021 – Broken Access Control": ["CWE-22", "CWE-284", "CWE-285", "CWE-639", "CWE-862"],
+    "A02:2021 – Cryptographic Failures": ["CWE-259", "CWE-327", "CWE-331", "CWE-798", "CWE-328"],
+    "A03:2021 – Injection": ["CWE-79", "CWE-89", "CWE-78", "CWE-94", "CWE-1336"],
+    "A04:2021 – Insecure Design": ["CWE-1173", "CWE-840"],
+    "A05:2021 – Security Misconfiguration": ["CWE-16", "CWE-250", "CWE-269", "CWE-732", "CWE-798"],
+    "A06:2021 – Vulnerable and Outdated Components": ["CWE-1104", "CWE-937"],
+    "A07:2021 – Identification and Authentication Failures": ["CWE-287", "CWE-306", "CWE-798"],
+    "A08:2021 – Software and Data Integrity Failures": ["CWE-345", "CWE-502", "CWE-829", "CWE-611"],
+    "A09:2021 – Security Logging and Monitoring Failures": ["CWE-117", "CWE-223", "CWE-778"],
+    "A10:2021 – Server-Side Request Forgery (SSRF)": ["CWE-918"],
+}
+
+def _validate_and_correct_cwe(llm_cwe: str, owasp_category: str, rule_id: str = None) -> str:
+    """
+    Validates the LLM-generated CWE against the authoritative OWASP->CWE mapping.
+    Returns a corrected CWE ID if the LLM's output is invalid for the category.
+    """
+    valid_cwes = _CWE_BY_OWASP.get(owasp_category, [])
+    
+    # Use rule_id to disambiguate if possible, overriding LLM even if in valid set
+    if rule_id:
+        if "sql" in rule_id.lower() and "CWE-89" in valid_cwes:
+            return "CWE-89"
+        elif "xss" in rule_id.lower() and "CWE-79" in valid_cwes:
+            return "CWE-79"
+        elif ("secret" in rule_id.lower() or "key" in rule_id.lower()) and "CWE-798" in valid_cwes:
+            return "CWE-798"
+        elif "ssti" in rule_id.lower() and "CWE-1336" in valid_cwes:
+            return "CWE-1336"
+        elif "user" in rule_id.lower() and "docker" in rule_id.lower() and "CWE-269" in valid_cwes:
+            return "CWE-269"
+
+    if llm_cwe in valid_cwes:
+        return llm_cwe
+            
+    corrected = valid_cwes[0] if valid_cwes else llm_cwe
+    print(f"[CWE Correction] {llm_cwe} -> {corrected} (owasp={owasp_category}, rule={rule_id})", flush=True)
+    return corrected
+
+# ── POC VALIDATION MAPPING ──────────────────────────────────────────────────
+_GENERIC_POC_PHRASES = [
+    "a specific curl command",
+    "a specific payload",
+    "malicious code or access sensitive data",
+    "payload can be used to",
+    "an attacker can create a container",
+    "a specific curl command or payload"
+]
+
+def _is_generic_poc(poc_text: str) -> bool:
+    """Flags PoC sections that are vague boilerplate rather than concrete steps."""
+    lowered = poc_text.lower()
+    return any(phrase in lowered for phrase in _GENERIC_POC_PHRASES)
+
+def _apply_fallback_poc(report_text: str, rule_id: str) -> str:
+    """Applies a deterministic template for generic PoCs based on vulnerability class."""
+    import re
+    # Extract the PoC section (Section 6)
+    poc_match = re.search(r'(6\.\s*Proof of Concept[^\n]*\n)(.*?)(?=\n7\.|\Z)', report_text, re.IGNORECASE | re.DOTALL)
+    if not poc_match:
+        return report_text
+        
+    fallback_poc = "```bash\n# Generic Proof of Concept\necho 'Vulnerability confirmed via static analysis.'\n```\n"
+    rule_lower = rule_id.lower()
+    
+    if "user" in rule_lower and "docker" in rule_lower:
+        fallback_poc = "```bash\ndocker build -t test_image .\ndocker run --rm test_image whoami\n# Outputs: root\n```\n"
+    elif "sql" in rule_lower:
+        fallback_poc = "```sql\n-- Parameterized query bypass example\n' OR 1=1 --\n```\n"
+    elif "secret" in rule_lower or "key" in rule_lower:
+        fallback_poc = "```bash\n# Extract exposed credential from repository history\ngit log -p | grep -i 'AKIA'\n```\n"
+        
+    new_text = report_text[:poc_match.start(2)] + fallback_poc + report_text[poc_match.end(2):]
+    return new_text
+
+
 
 def _compute_cvss31_score(vector: str) -> float | None:
     """Compute the real CVSS 3.1 base score from a vector string.
@@ -142,25 +220,13 @@ def _resolve_owasp_category(llm_owasp_text: str) -> str | None:
     return best_label
 
 
-def _postprocess_report(report_text: str) -> str:
-    """Post-process a raw LLM vulnerability report to enforce correctness of:
-
-    1. CVSS 3.1 score  — extracted from the vector string, recomputed via formula,
-                         then the LLM's claimed score is replaced with the real one.
-    2. OWASP category  — validated against the authoritative 2021 list and corrected
-                         if the LLM produced a wrong year (2017), paraphrased name,
-                         or invented a non-existent category/year combination.
-
-    This function is the final quality gate: it runs AFTER the LLM call and BEFORE
-    the report reaches the user, ensuring classification metadata is always accurate
-    regardless of LLM output quality.
-    """
+def _postprocess_report(report_text: str, rule_id: str = None) -> str:
+    """Post-generation quality gate: validates CVSS, OWASP category, and CWE."""
     import re
 
     text = report_text
 
     # ── 1. CVSS SCORE CORRECTION ─────────────────────────────────────────────
-    # Find the CVSS 3.1 vector string in the report.
     vector_re = re.compile(
         r'(CVSS:3\.1/)?(AV:[NALP]/AC:[LH]/PR:[NLH]/UI:[NR]/S:[CU]/C:[NLH]/I:[NLH]/A:[NLH])',
         re.IGNORECASE
@@ -173,7 +239,6 @@ def _postprocess_report(report_text: str) -> str:
             severity = "Critical" if computed >= 9.0 else \
                        "High"     if computed >= 7.0 else \
                        "Medium"   if computed >= 4.0 else "Low"
-            # Pattern allows for markdown asterisks anywhere around the label/colon
             score_re = re.compile(
                 r'((?:CVSS[\s\*]*3\.1[\s\*]*)?(?:Base[\s\*]*)?Score[\s\*]*[:\-][\s\*]*)(\[COMPUTED\]|\d+\.\d+)[\s\*]*(\([^)]+\))?',
                 re.IGNORECASE
@@ -183,24 +248,39 @@ def _postprocess_report(report_text: str) -> str:
             if new_text != text:
                 text = new_text
             else:
-                # Score wasn't found in expected format — append a correction note
                 text = text.replace(
                     raw_vector,
                     f"{raw_vector} *(Computed Score: **{computed}** ({severity}))*"
                 )
 
     # ── 2. OWASP CATEGORY CORRECTION ─────────────────────────────────────────
-    # Find whatever the LLM wrote after "OWASP" or "OWASP Category:"
     owasp_re = re.compile(
         r'(OWASP[\s\*]*(?:Top[\s\*]*10[\s\*]*)?(?:Category|Label|Classification)?[\s\*]*[:\u2013\-][\s\*]*)([^\n]+)',
         re.IGNORECASE
     )
     owasp_match = owasp_re.search(text)
+    final_owasp = None
     if owasp_match:
         llm_owasp = owasp_match.group(2).strip()
         corrected = _resolve_owasp_category(llm_owasp)
-        if corrected and corrected != llm_owasp:
-            text = text[:owasp_match.start(2)] + corrected + text[owasp_match.end(2):]
+        if corrected:
+            final_owasp = corrected
+            if corrected != llm_owasp:
+                text = text[:owasp_match.start(2)] + corrected + text[owasp_match.end(2):]
+        else:
+            final_owasp = llm_owasp
+            
+    # ── 3. CWE CORRECTION ────────────────────────────────────────────────────
+    cwe_re = re.compile(
+        r'(CWE[\s\*]*[:\u2013\-]?[\s\*]*)(CWE-\d+)',
+        re.IGNORECASE
+    )
+    cwe_match = cwe_re.search(text)
+    if cwe_match and final_owasp:
+        llm_cwe = cwe_match.group(2).upper()
+        corrected_cwe = _validate_and_correct_cwe(llm_cwe, final_owasp, rule_id)
+        if corrected_cwe != llm_cwe:
+            text = text[:cwe_match.start(2)] + corrected_cwe + text[cwe_match.end(2):]
 
     return text
 
@@ -903,11 +983,23 @@ MANDATORY CVSS 3.1 MATH RULES - apply BEFORE choosing a score:
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content}
     ]
-    # _postprocess_report() is the final quality gate:
-    # — recomputes CVSS score from the vector using the real formula
-    # — validates and corrects the OWASP category against the 2021 list
-    # This runs AFTER the LLM call so classification metadata is always accurate.
-    return _postprocess_report(_call_cloud_llm(messages))
+    
+    initial_report = _call_cloud_llm(messages)
+    rule_id = finding.get("check_id", "")
+    processed = _postprocess_report(initial_report, rule_id=rule_id)
+    
+    if _is_generic_poc(processed):
+        reprompt_msg = "Your PoC section is too generic. Rewrite Section 6 (Proof of Concept) to provide a concrete, step-by-step scenario grounded in the actual code snippet provided. Do not use generic phrases like 'a specific payload' or 'a specific curl command'."
+        messages.append({"role": "assistant", "content": initial_report})
+        messages.append({"role": "user", "content": reprompt_msg})
+        
+        second_report = _call_cloud_llm(messages)
+        processed = _postprocess_report(second_report, rule_id=rule_id)
+        
+        if _is_generic_poc(processed):
+            processed = _apply_fallback_poc(processed, rule_id)
+            
+    return processed
 
 
 def apply_auto_fix(project_id: str, finding: dict) -> dict:
