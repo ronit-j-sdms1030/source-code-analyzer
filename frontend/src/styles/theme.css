@@ -346,6 +346,16 @@ body { margin: 0; padding: 0; }
   .empty-title { font-size: 24px; }
 }
 
+@keyframes slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.slider-bar {
+  animation: slide 1.5s infinite linear;
+  width: 30%;
+}
+
 @keyframes pulse-fix { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.95); } 100% { opacity: 1; transform: scale(1); } }
 
 .btn-fixing {
