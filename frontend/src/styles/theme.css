@@ -31,7 +31,8 @@ body { margin: 0; padding: 0; }
 
 
 .app {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: var(--bg-void);
   color: var(--text-primary);
   font-family: 'Inter', system-ui, sans-serif;

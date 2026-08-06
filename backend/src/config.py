@@ -21,3 +21,6 @@ EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 MAX_FILES_PER_REPO = int(os.environ.get("MAX_FILES_PER_REPO", 800))
 SKIP_DIRS = {".git", "venv", ".venv", "__pycache__", "node_modules", "dist", "build"}
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-prod")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "stark123")

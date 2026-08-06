@@ -13,9 +13,13 @@ const BASE_URL = ""; // same-origin; Flask serves the built frontend + API
 async function request(path, options = {}) {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     ...options,
   });
   if (!res.ok) {
+    if (res.status === 401) {
+      window.dispatchEvent(new Event("unauthorized"));
+    }
     const body = await res.text().catch(() => "");
     throw new Error(`${options.method || "GET"} ${path} failed: ${res.status} ${body}`);
   }
@@ -60,6 +64,20 @@ export function autoFixVulnerability(id, finding) {
   });
 }
 
+export function evaluateFix(id, finding) {
+  return request(`/projects/${id}/vulnerabilities/evaluate_fix`, {
+    method: "POST",
+    body: JSON.stringify({ finding }),
+  });
+}
+
+export function applyEvaluatedFix(id, finding, fixed_content) {
+  return request(`/projects/${id}/vulnerabilities/apply_evaluated_fix`, {
+    method: "POST",
+    body: JSON.stringify({ finding, fixed_content }),
+  });
+}
+
 export function rescanVulnerabilities(id) {
   return request(`/projects/${id}/vulnerabilities/rescan`, {
     method: "POST",
@@ -98,4 +116,21 @@ export function pollIngestStatus(id, onUpdate, { intervalMs = 1000 } = {}) {
   return () => {
     cancelled = true;
   };
+}
+
+export function login(password) {
+  return request("/api/login", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function logout() {
+  return request("/api/logout", {
+    method: "POST",
+  });
+}
+
+export function checkAuth() {
+  return request("/api/check_auth");
 }

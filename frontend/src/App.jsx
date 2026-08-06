@@ -5,8 +5,54 @@ import NewProjectPanel from "./components/NewProjectPanel";
 import ProjectCard from "./components/ProjectCard";
 import ChatPanel from "./components/ChatPanel";
 import VulnerabilityModal from "./components/VulnerabilityModal";
-import { listProjects, startIngest, deleteProject as apiDeleteProject, askQuestion as apiAskQuestion, pollIngestStatus } from "./lib/api";
+import { listProjects, startIngest, deleteProject as apiDeleteProject, askQuestion as apiAskQuestion, pollIngestStatus, login, logout, checkAuth } from "./lib/api";
 import starkLogo from "/stark.svg";
+
+/* ---------------------------------- login ---------------------------------- */
+
+function Login({ onLogin }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await login(password);
+      onLogin();
+    } catch (err) {
+      setError("Invalid password");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "var(--bg-void)" }}>
+      <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: "360px", padding: "40px", background: "var(--bg-panel)", borderRadius: "12px", border: "1px solid var(--border-hair)", boxShadow: "0 10px 30px rgba(0,0,0,0.5)" }}>
+        <div style={{ textAlign: "center", marginBottom: "32px" }}>
+          <img src={starkLogo} alt="Stark Digital" style={{ width: "48px", height: "48px", marginBottom: "16px" }} />
+          <h2 style={{ margin: 0, fontSize: "20px", color: "var(--text-primary)" }}>Sign In</h2>
+        </div>
+        {error && <div style={{ color: "var(--status-error)", marginBottom: "16px", fontSize: "14px", textAlign: "center" }}>{error}</div>}
+        <div style={{ marginBottom: "24px" }}>
+          <input
+            type="password"
+            placeholder="Admin Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{ width: "100%", padding: "12px 16px", background: "var(--bg-void)", border: "1px solid var(--border-hair)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "15px" }}
+            autoFocus
+          />
+        </div>
+        <button type="submit" className="btn-accent" style={{ width: "100%", padding: "12px", justifyContent: "center" }} disabled={loading || !password}>
+          {loading ? "Authenticating..." : "Continue"}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 /* ------------------------------- empty state ------------------------------- */
 
@@ -43,20 +89,40 @@ export default function SourceCodeAnalyzer() {
   const [newOpen, setNewOpen] = useState(false);
   const [theme, setTheme] = useState("dark");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(null);
   const cancelPollers = useRef({});
 
-  // Load existing projects from the backend on mount.
+  // Listen for 401 unauthorized events from api.js
   useEffect(() => {
+    const handleAuthError = () => setIsAuthenticated(false);
+    window.addEventListener("unauthorized", handleAuthError);
+    return () => window.removeEventListener("unauthorized", handleAuthError);
+  }, []);
+
+  // Check auth and load projects on mount
+  useEffect(() => {
+    checkAuth()
+      .then((res) => {
+        setIsAuthenticated(res.authenticated);
+        if (res.authenticated) {
+          loadProjects();
+        }
+      })
+      .catch(() => setIsAuthenticated(false));
+  }, []);
+
+  const loadProjects = () => {
     listProjects()
       .then((list) => {
         setProjects(list);
         if (list[0]) setSelectedId(list[0].id);
-        // resume polling for anything still indexing
         list.filter((p) => p.status === "indexing").forEach((p) => watchIngest(p.id));
       })
       .catch((err) => console.error("Failed to load projects", err));
+  };
+
+  useEffect(() => {
     return () => Object.values(cancelPollers.current).forEach((cancel) => cancel && cancel());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selected = projects.find((p) => p.id === selectedId) || null;
@@ -141,6 +207,23 @@ export default function SourceCodeAnalyzer() {
     }));
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+      setIsAuthenticated(false);
+    } catch (err) {
+      console.error("Failed to logout", err);
+    }
+  };
+
+  if (isAuthenticated === null) {
+    return <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-void)", color: "var(--text-tertiary)" }}>Loading...</div>;
+  }
+
+  if (isAuthenticated === false) {
+    return <Login onLogin={() => { setIsAuthenticated(true); loadProjects(); }} />;
+  }
+
   return (
     <div className="app" data-theme={theme}>
       <header className="topbar">
@@ -154,16 +237,28 @@ export default function SourceCodeAnalyzer() {
         <div className="topbar-stats">
           <span>{projects.length} repos</span>
         </div>
-        <button
-          className="theme-toggle"
-          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-          aria-label="Toggle theme"
-        >
-          <span className="theme-toggle-label">{theme === "dark" ? "Dark" : "Light"}</span>
-          <span className="theme-toggle-track">
-            <span className="theme-toggle-thumb" />
-          </span>
-        </button>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginLeft: 'auto' }}>
+          <button
+            className="theme-toggle"
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            aria-label="Toggle theme"
+          >
+            <span className="theme-toggle-label">{theme === "dark" ? "Dark" : "Light"}</span>
+            <span className="theme-toggle-track">
+              <span className="theme-toggle-thumb" />
+            </span>
+          </button>
+          
+          <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid var(--border-hair)', paddingLeft: '16px' }}>
+            <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
+              AD
+            </div>
+            <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}>
+              Logout
+            </button>
+          </div>
+        </div>
       </header>
 
       <div className="body">

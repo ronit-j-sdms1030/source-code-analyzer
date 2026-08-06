@@ -332,3 +332,78 @@ Brief description of the fix.
         final_message = description
         
     return {"status": "success", "file": file_path, "message": final_message}
+
+
+def evaluate_auto_fix(project_id: str, finding: dict) -> dict:
+    """Evaluates the fix for a vulnerability, returning the risk assessment and fixed code without applying it."""
+    import os
+    file_path = finding.get("path", "")
+    if not file_path:
+        raise ValueError("Finding does not contain a file path.")
+    
+    full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
+    if not os.path.exists(full_path):
+        raise ValueError(f"File not found on disk: {file_path}")
+        
+    with open(full_path, "r", encoding="utf-8") as f:
+        file_content = f.read()
+        
+    message = finding.get("extra", {}).get("message", "No message provided")
+    line = finding.get("start", {}).get("line", "?")
+    
+    system_prompt = """\
+You are an expert Security Engineer and software developer.
+You will be provided with the full content of a source code file that contains a security vulnerability.
+Your task is to fix the vulnerability by rewriting the entire file securely, BUT FIRST you must evaluate what new vulnerabilities or side-effects this fix might lead to.
+
+Rules:
+1. First, write a detailed Markdown section starting with `### Risk Assessment`. Explain the potential side effects of your proposed fix. Will it break backward compatibility? Will it lead to denial of service if not configured properly? Are there any new secondary risks introduced?
+2. Then, output the ENTIRE, fully fixed file contents inside a standard markdown code block.
+3. You MUST output the COMPLETE file from top to bottom. Do NOT truncate the file or use placeholders like `// ... rest of code`.
+
+Format your response EXACTLY like this:
+
+### Risk Assessment
+[Your detailed risk assessment here...]
+
+```[language]
+[ENTIRE fully fixed file contents here]
+```
+"""
+    
+    user_content = (
+        f"Vulnerability Message: {message}\n"
+        f"Line Number: {line}\n\n"
+        f"File Content:\n```\n{file_content}\n```"
+    )
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    
+    response = _call_cloud_llm(messages, model_name=config.CLOUD_FIX_MODEL)
+    
+    parts = response.split("```")
+    if len(parts) >= 3:
+        risk_assessment = parts[0].strip() or "No risk assessment provided."
+        lines = parts[1].split("\n")
+        if lines and not lines[0].strip().startswith(("import", "def", "class", "/", "*", "<")):
+            lines = lines[1:]
+        fixed_content = "\n".join(lines).strip()
+        
+        if len(fixed_content) < len(file_content) * 0.2:
+            return {
+                "error": "The AI output a partial snippet instead of the full file.",
+                "risk_assessment": risk_assessment
+            }
+            
+        return {
+            "risk_assessment": risk_assessment,
+            "fixed_content": fixed_content
+        }
+    else:
+        return {
+            "error": "The AI did not output a valid code block.",
+            "risk_assessment": response
+        }

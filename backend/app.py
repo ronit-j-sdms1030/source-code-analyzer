@@ -11,7 +11,8 @@ In production this also serves the built React frontend from ./static
 (see frontend/vite.config.js, which builds directly into backend/static).
 """
 
-from flask import Flask, jsonify, request, send_from_directory, send_file
+from flask import Flask, jsonify, request, send_from_directory, send_file, session
+from functools import wraps
 
 from src import config
 from src.ingestion import start_ingest, get_status, delete_project
@@ -19,14 +20,44 @@ from src.chain import answer_question
 from src.vectorstore import list_projects
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+app.secret_key = config.SECRET_KEY
+
+def auth_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('authenticated'):
+            return jsonify({"error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+@app.post("/api/login")
+def login():
+    body = request.get_json(force=True)
+    password = (body or {}).get("password", "")
+    if password == config.ADMIN_PASSWORD:
+        session['authenticated'] = True
+        return jsonify({"ok": True})
+    return jsonify({"error": "Invalid password"}), 401
+
+@app.post("/api/logout")
+def logout():
+    session.pop('authenticated', None)
+    return jsonify({"ok": True})
+
+@app.get("/api/check_auth")
+def check_auth():
+    return jsonify({"authenticated": session.get('authenticated', False)})
+
 
 
 @app.get("/projects")
+@auth_required
 def projects():
     return jsonify(list_projects())
 
 
 @app.post("/ingest")
+@auth_required
 def ingest():
     body = request.get_json(force=True)
     url = (body or {}).get("url", "").strip()
@@ -38,6 +69,7 @@ def ingest():
 
 
 @app.get("/ingest/<project_id>/status")
+@auth_required
 def ingest_status(project_id):
     status = get_status(project_id)
     if status is None:
@@ -46,6 +78,7 @@ def ingest_status(project_id):
 
 
 @app.post("/chat")
+@auth_required
 def chat():
     body = request.get_json(force=True)
     project_id = (body or {}).get("projectId")
@@ -57,6 +90,7 @@ def chat():
 
 
 @app.get("/projects/<project_id>/vulnerabilities")
+@auth_required
 def get_vulnerabilities(project_id):
     import os
     import json
@@ -71,6 +105,7 @@ def get_vulnerabilities(project_id):
 
 
 @app.post("/projects/<project_id>/vulnerabilities/report")
+@auth_required
 def generate_vuln_report(project_id):
     from src.chain import generate_vulnerability_report
     body = request.get_json(force=True)
@@ -85,6 +120,7 @@ def generate_vuln_report(project_id):
 
 
 @app.post("/projects/<project_id>/vulnerabilities/autofix")
+@auth_required
 def auto_fix_vulnerability(project_id):
     from src.chain import apply_auto_fix
     import os
@@ -142,7 +178,94 @@ def auto_fix_vulnerability(project_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.post("/projects/<project_id>/vulnerabilities/evaluate_fix")
+@auth_required
+def evaluate_fix(project_id):
+    from src.chain import evaluate_auto_fix
+    body = request.get_json(force=True)
+    finding = (body or {}).get("finding")
+    if not finding:
+        return jsonify({"error": "finding is required"}), 400
+    try:
+        result = evaluate_auto_fix(project_id, finding)
+        if "error" in result:
+            return jsonify(result), 500
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/projects/<project_id>/vulnerabilities/apply_evaluated_fix")
+@auth_required
+def apply_evaluated_fix(project_id):
+    import os
+    import json
+    
+    body = request.get_json(force=True)
+    finding = (body or {}).get("finding")
+    fixed_content = (body or {}).get("fixed_content")
+    
+    if not finding or not fixed_content:
+        return jsonify({"error": "finding and fixed_content are required"}), 400
+        
+    try:
+        file_path = finding.get("path", "")
+        if not file_path:
+            return jsonify({"error": "Finding does not contain a file path."}), 400
+            
+        full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
+        if not os.path.exists(full_path):
+            return jsonify({"error": f"File not found on disk: {file_path}"}), 400
+            
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(fixed_content)
+            
+        result = {"status": "success", "file": file_path, "message": "Applied evaluated fix successfully."}
+        
+        # Remove the finding from the report.json to keep it in sync
+        report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
+        if os.path.exists(report_path):
+            with open(report_path, "r", encoding="utf-8") as f:
+                report_data = json.load(f)
+            
+            if "results" in report_data:
+                original_len = len(report_data["results"])
+                report_data["results"] = [
+                    r for r in report_data["results"] 
+                    if not (r.get("path") == finding.get("path") and 
+                            r.get("start", {}).get("line") == finding.get("start", {}).get("line") and 
+                            r.get("extra", {}).get("message") == finding.get("extra", {}).get("message"))
+                ]
+                
+                if len(report_data["results"]) < original_len:
+                    with open(report_path, "w", encoding="utf-8") as f:
+                        json.dump(report_data, f, indent=2)
+                        
+                    counts = {"high": 0, "medium": 0, "low": 0}
+                    for res in report_data["results"]:
+                        sev = res.get("extra", {}).get("severity", "").lower()
+                        if sev in ("error", "high"): counts["high"] += 1
+                        elif sev in ("warning", "medium"): counts["medium"] += 1
+                        else: counts["low"] += 1
+                        
+                    from src.ingestion import _projects, _lock
+                    with _lock:
+                        if project_id in _projects:
+                            from src.vectorstore import upsert_project_meta
+                            _projects[project_id]["vulnerabilities"] = counts
+                            upsert_project_meta(project_id, {**_projects[project_id]})
+                            
+                    from src.chain import _append_history
+                    msg = f"**✨ Fix Applied:** Fixed {finding.get('path', 'unknown file')} ({finding.get('extra', {}).get('message', '')}).\nDetails: {result.get('message', '')}"
+                    _append_history(project_id, {"role": "assistant", "text": msg})
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.post("/projects/<project_id>/vulnerabilities/rescan")
+@auth_required
 def rescan_vulnerabilities_route(project_id):
     from src.ingestion import rescan_vulnerabilities
     try:
@@ -153,12 +276,14 @@ def rescan_vulnerabilities_route(project_id):
 
 
 @app.delete("/projects/<project_id>")
+@auth_required
 def remove_project(project_id):
     delete_project(project_id)
     return jsonify({"ok": True})
 
 
 @app.get("/projects/<project_id>/download/repo")
+@auth_required
 def download_repo(project_id):
     import shutil
     import os
@@ -174,7 +299,8 @@ def download_repo(project_id):
 
 
 @app.post("/projects/<project_id>/push")
-def push_repo(project_id):
+@auth_required
+def push_fixes(project_id):
     import os
     import git
     import uuid
@@ -238,6 +364,7 @@ def push_repo(project_id):
 
 
 @app.get("/projects/<project_id>/download/report")
+@auth_required
 def download_report(project_id):
     import os
     report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
