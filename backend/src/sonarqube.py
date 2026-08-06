@@ -96,6 +96,7 @@ def _run_sonar_scan(project_id: str, repo_path: str):
     # Setup scanner container with host networking to reach localhost:9000
     cmd = [
         "docker", "run", "--rm",
+        "--name", f"sonar-scanner-{project_id}",
         "-v", f"{repo_path}:/usr/src",
         "--network", "host",
         "sonarsource/sonar-scanner-cli",
@@ -108,8 +109,13 @@ def _run_sonar_scan(project_id: str, repo_path: str):
         save_quality_metrics(project_id, {"status": "running", "stage": "Scanning codebase"})
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print("SonarScanner failed:", result.stderr)
-            save_quality_metrics(project_id, {"status": "error", "error": "Scanner failed. See logs for details."})
+            # If the container was killed by stop, it will return non-zero
+            print("SonarScanner failed or was cancelled:", result.stderr)
+            # Only update status to error if it wasn't already marked as cancelled
+            from .memory import get_quality_metrics
+            current = get_quality_metrics(project_id)
+            if current.get("status") != "cancelled":
+                save_quality_metrics(project_id, {"status": "error", "error": "Scanner failed. See logs for details."})
             return
             
         save_quality_metrics(project_id, {"status": "running", "stage": "Processing results on SonarQube"})
@@ -118,6 +124,11 @@ def _run_sonar_scan(project_id: str, repo_path: str):
     except Exception as e:
         print("Exception in sonar scan:", e)
         save_quality_metrics(project_id, {"status": "error", "error": str(e)})
+
+def cancel_quality_scan(project_id: str):
+    """Cancels a running SonarQube scan by stopping its docker container."""
+    save_quality_metrics(project_id, {"status": "cancelled", "error": "Scan was stopped by the user."})
+    subprocess.run(["docker", "stop", f"sonar-scanner-{project_id}"], capture_output=True)
 
 def _poll_and_fetch_metrics(project_id: str, password: str):
     base_url = "http://127.0.0.1:9000"

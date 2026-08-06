@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import Icon from "./icons";
-import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities, applyEvaluatedFix, getQualityScanStatus, startQualityScan, pollQualityScanStatus } from "../lib/api";
+import { getVulnerabilities, autoFixVulnerability, rescanVulnerabilities, applyEvaluatedFix, getQualityScanStatus, startQualityScan, pollQualityScanStatus, cancelQualityScan } from "../lib/api";
 import { MODEL_NAME } from "../lib/api";
 
 const CodeBlock = ({ node, inline, className, children, ...props }) => {
@@ -157,6 +157,15 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
     }
   };
 
+  const handleCancelQualityScan = async () => {
+    try {
+      await cancelQualityScan(project.id);
+      setQualityMetrics({ status: "cancelled", error: "Scan was stopped by the user." });
+    } catch (err) {
+      alert("Error stopping quality scan: " + err.message);
+    }
+  };
+
   useEffect(() => {
     window.onRefreshProjects = onRefresh;
   }, [onRefresh]);
@@ -238,14 +247,25 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
               <div style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                 Code Quality (SonarQube)
               </div>
-              <button
-                className="action-btn"
-                style={{ fontSize: "11px", padding: "4px 8px" }}
-                disabled={qualityMetrics?.status === "running"}
-                onClick={handleRunQualityScan}
-              >
-                {qualityMetrics?.status === "running" ? "Scanning..." : "Run Quality Scan"}
-              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                {qualityMetrics?.status === "running" && (
+                  <button
+                    className="action-btn"
+                    style={{ fontSize: "11px", padding: "4px 8px", backgroundColor: "var(--bg-panel)", color: "var(--text-error)" }}
+                    onClick={handleCancelQualityScan}
+                  >
+                    Stop Scan
+                  </button>
+                )}
+                <button
+                  className="action-btn"
+                  style={{ fontSize: "11px", padding: "4px 8px" }}
+                  disabled={qualityMetrics?.status === "running"}
+                  onClick={handleRunQualityScan}
+                >
+                  {qualityMetrics?.status === "running" ? "Scanning..." : "Run Quality Scan"}
+                </button>
+              </div>
             </div>
             
             <div style={{ marginTop: "12px", display: "flex", gap: "12px", flexWrap: "wrap" }}>

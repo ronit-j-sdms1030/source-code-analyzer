@@ -83,6 +83,14 @@ def trigger_quality_scan(project_id):
     return jsonify({"status": "queued"})
 
 
+@app.post("/projects/<project_id>/quality-scan/cancel")
+@auth_required
+def cancel_quality_scan_endpoint(project_id):
+    from src.sonarqube import cancel_quality_scan
+    cancel_quality_scan(project_id)
+    return jsonify({"status": "cancelled"})
+
+
 @app.get("/projects/<project_id>/quality-scan/status")
 @auth_required
 def get_quality_scan_status(project_id):

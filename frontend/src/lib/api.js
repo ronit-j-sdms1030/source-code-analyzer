@@ -151,6 +151,10 @@ export function startQualityScan(id) {
   return request(`/projects/${id}/quality-scan`, { method: "POST" });
 }
 
+export function cancelQualityScan(id) {
+  return request(`/projects/${id}/quality-scan/cancel`, { method: "POST" });
+}
+
 export function getQualityScanStatus(id) {
   return request(`/projects/${id}/quality-scan/status`);
 }
