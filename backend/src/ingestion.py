@@ -77,6 +77,9 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
     os.makedirs(config.REPORTS_DIR, exist_ok=True)
     report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
     
+    if not os.environ.get("SEMGREP_APP_TOKEN"):
+        print("[WARNING] SEMGREP_APP_TOKEN is missing. Semgrep will run in degraded mode and censor secrets.", flush=True)
+    
     try:
         subprocess.run(
             ["semgrep", "scan", "--config", "auto", "--config", "custom_rules.yml", "--no-git-ignore", "--exclude", ".git", "--json", "--output", report_path, repo_path],
@@ -94,6 +97,11 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
                 path = finding.get("path", "")
                 if path and path.startswith(repo_path):
                     finding["path"] = os.path.relpath(path, repo_path)
+                    
+                # Guardrail: check raw Semgrep output for degradation BEFORE we overwrite it
+                raw_lines = finding.get("extra", {}).get("lines", "").lower()
+                if raw_lines and len(raw_lines) < 40 and ("login" in raw_lines or "requires" in raw_lines):
+                    print(f"[WARNING] Semgrep silent degradation detected on '{finding.get('check_id')}': raw snippet was '{raw_lines}'. Ensure SEMGREP_APP_TOKEN is configured.", flush=True)
                     
                 # Manually extract snippet to bypass Semgrep redaction
                 try:
