@@ -237,6 +237,15 @@ def _run_pipeline(project_id: str, url: str, token: str = ""):
         chunks = _split_files(py_files, repo_path)
         _set_stage(project_id, 4)
 
+        # [4.5] Deterministic Dependency Graph
+        try:
+            from .graph import build_graph
+            from .memory import save_graph
+            graph = build_graph(project_id, repo_path, py_files)
+            save_graph(project_id, graph)
+        except Exception as e:
+            print(f"Graph build error: {e}")
+
         # [5] Embedder — chunk -> vector
         vectors = embed_chunks([c["text"] for c in chunks])
         _set_stage(project_id, 5)

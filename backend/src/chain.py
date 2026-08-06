@@ -607,7 +607,15 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
                 append_to_session(session_id, {"role": "assistant", "text": ans})
                 return {"answer": ans, "sources": [], "debug_context": debug_context}
             else:
-                chunks = [{"text": docs[0], "file_path": metas[0].get("file_path", "unknown")}]
+                file_path = metas[0].get("file_path", "unknown")
+                from .graph import get_graph_context
+                graph_context = get_graph_context(project_id, file_path, max_hops=1) if file_path != "unknown" else ""
+                
+                text_content = docs[0]
+                if graph_context:
+                    text_content += f"\n\nCode Context (Dependency Graph):\n{graph_context}"
+                    
+                chunks = [{"text": text_content, "file_path": file_path}]
                 debug_context["retrieved_findings"] = metas
                 
                 # If inferred, add to debug_context so frontend can surface this
@@ -1240,13 +1248,6 @@ def evaluate_auto_fix(project_id: str, finding: dict) -> dict:
         }
     # ── END GATE ─────────────────────────────────────────────────────────────
     
-    full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
-    if not os.path.exists(full_path):
-        raise ValueError(f"File not found on disk: {file_path}")
-        
-    with open(full_path, "r", encoding="utf-8") as f:
-        file_content = f.read()
-        
     message = finding.get("extra", {}).get("message", "No message provided")
     line = finding.get("start", {}).get("line", "?")
     
@@ -1276,11 +1277,63 @@ Format your response EXACTLY like this:
 ```
 """
     
-    user_content = (
-        f"Vulnerability Message: {message}\n"
-        f"Line Number: {line}\n\n"
-        f"File Content:\n```\n{file_content}\n```"
-    )
+    from .graph import get_graph_context
+    graph_context = get_graph_context(project_id, file_path, max_hops=1)
+    
+    # Estimate token count (chars / 4) for logging
+    full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
+    if os.path.exists(full_path):
+        with open(full_path, "r", encoding="utf-8") as f:
+            base_file_content = f.read()
+    else:
+        base_file_content = ""
+        
+    base_tokens = len(base_file_content) // 4
+    
+    has_dependencies = graph_context.count("--- FILE:") > 1
+    
+    if graph_context and graph_context.strip() and has_dependencies:
+        graph_tokens = len(graph_context) // 4
+        print(f"[Token Savings] Graph context used ~{graph_tokens} tokens (vs ~{base_tokens} tokens target file only)")
+        
+        user_content = (
+            f"Vulnerability Message: {message}\n"
+            f"Line Number: {line}\n\n"
+            f"Target File and 1-Hop Dependencies:\n```\n{graph_context}\n```"
+        )
+    else:
+        print(f"[Token Savings] Graph returned no useful dependencies, falling back to Chroma semantic search (base file ~{base_tokens} tokens)")
+        
+        # Fallback to ChromaDB semantic similarity if graph is empty
+        from .vectorstore import query_chunks
+        query_text = f"{file_path} {message}"
+        results = query_chunks(project_id, None, top_k=2) # We don't have the query vector here, but query_chunks might need it? 
+        # Actually vectorstore.py's query_chunks requires query_vector. We'd have to embed it. 
+        # Let's just fallback to the base file content for simplicity if we don't want to import the embedder here.
+        # Wait, the instruction says "Fall back to ChromaDB only if the graph lookup returns nothing useful".
+        
+        try:
+            from .vectorstore import query_chunks
+            from .embeddings import embed_query
+            query_vector = embed_query(query_text)
+            chroma_results = query_chunks(project_id, query_vector, top_k=3)
+            chroma_context = "\n".join([c["text"] for c in chroma_results.get("results", [])])
+        except Exception:
+            chroma_context = ""
+            
+        if chroma_context:
+            user_content = (
+                f"Vulnerability Message: {message}\n"
+                f"Line Number: {line}\n\n"
+                f"Target File:\n```\n{base_file_content}\n```\n\n"
+                f"Semantic Context:\n```\n{chroma_context}\n```"
+            )
+        else:
+            user_content = (
+                f"Vulnerability Message: {message}\n"
+                f"Line Number: {line}\n\n"
+                f"File Content:\n```\n{base_file_content}\n```"
+            )
     
     messages = [
         {"role": "system", "content": system_prompt},

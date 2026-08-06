@@ -115,3 +115,41 @@ Focus on preserving context, stated preferences, and current context state.
 
     # New history is the summary + the last 4 messages
     history[:] = [summary_msg] + history[-4:]
+
+# ── Graph Storage API ─────────────────────────────────────────────────────────
+
+def _graph_file_path(project_id: str) -> str:
+    import os
+    from . import config
+    return os.path.join(config.REPORTS_DIR, f"{project_id}_graph.json")
+
+def get_graph(project_id: str) -> dict:
+    """Returns the code dependency graph for a project."""
+    import json
+    if _check_redis():
+        key = f"graph:{project_id}"
+        raw = _redis_client.get(key)
+        if not raw:
+            return {}
+        return json.loads(raw)
+    else:
+        import os
+        path = _graph_file_path(project_id)
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+def save_graph(project_id: str, graph: dict):
+    """Saves the code dependency graph for a project."""
+    import json
+    if _check_redis():
+        key = f"graph:{project_id}"
+        _redis_client.set(key, json.dumps(graph))
+    else:
+        path = _graph_file_path(project_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(graph, f, indent=2)
