@@ -88,14 +88,25 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
         if os.path.exists(report_path):
             with open(report_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                for finding in data.get("results", []):
-                    sev = finding.get("extra", {}).get("severity", "").lower()
-                    if sev == "error" or sev == "high":
-                        counts["high"] += 1
-                    elif sev == "warning" or sev == "medium":
-                        counts["medium"] += 1
-                    else:
-                        counts["low"] += 1
+                
+            for finding in data.get("results", []):
+                # Convert absolute path to relative path
+                path = finding.get("path", "")
+                if path and path.startswith(repo_path):
+                    finding["path"] = os.path.relpath(path, repo_path)
+                    
+                sev = finding.get("extra", {}).get("severity", "").lower()
+                if sev == "error" or sev == "high":
+                    counts["high"] += 1
+                elif sev == "warning" or sev == "medium":
+                    counts["medium"] += 1
+                else:
+                    counts["low"] += 1
+                    
+            # Save the fixed relative paths back to disk
+            with open(report_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                
         return counts
     except Exception as e:
         print(f"[semgrep error] {e}", flush=True)

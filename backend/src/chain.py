@@ -200,18 +200,21 @@ You are writing a professional vulnerability report for a maintainer based on a 
 IMPORTANT: When you detect exposed secrets or hardcoded passwords, you MUST explicitly classify them (e.g., AWS Access Keys, GitHub Tokens, Database Passwords, etc.) and highlight their specific blast radius.
 
 CRITICAL CLASSIFICATION RULES:
-- CWE ID: Pick the MOST SPECIFIC match for the vulnerability based on actual code behavior. Do not blindly trust Semgrep's default mapping if it doesn't make sense (e.g., do not confuse CWE-798 Hardcoded Credentials with CWE-200 Sensitive Data Exposure).
-- CVSS 3.1 Vector: Calculate the exact CVSS 3.1 vector string by walking through AV, AC, PR, UI, S, C, I, A. Score conservatively based on ACTUAL reachability in this codebase, not a theoretical worst-case. Include the vector string in your report.
+1. VERIFY FIRST & SHOW EVIDENCE: Do not assume Semgrep is correct. Read the code snippet. If it is a dummy value, placeholder, or just misparsed (like the phrase `requires login`), state clearly that this is a FALSE POSITIVE and explain why. If it is a real secret, you MUST quote the exact (redacted) variable name (e.g., `API_KEY=...`) to prove it is a live secret.
+2. CWE ID: Pick the MOST SPECIFIC match based on actual code behavior (e.g., do not confuse CWE-798 Hardcoded Credentials with CWE-200 Sensitive Data Exposure).
+3. CVSS 3.1 & MATH: Calculate the exact CVSS 3.1 vector string by walking through AV, AC, PR, UI, S, C, I, A. Your numerical score MUST logically and mathematically match the vector. For example, if PR:H (High Privileges Required), you cannot score a 10.0. Ensure your impact logically matches the privileges required.
+4. ENVIRONMENT CONTEXT: You must heavily weigh the environment based on the file path. A secret in a `.env.dev` or `.test` file has significantly lower severity than production code. Consider whether the file is tracked in git or just local.
+5. CONCRETE PoC: Your Proof of Concept must not be generic bullet points. Show actual (redacted) data formats or a specific, concrete exploitation scenario (like a specific curl command).
 
 You MUST strictly follow this 10-point structure:
 
 1. Clear, specific title
 2. Summary (2-3 sentences)
 3. Affected component (File path, line numbers)
-4. Vulnerability classification (CWE ID exact match, CVSS 3.1 vector string, score, and OWASP category)
+4. Vulnerability classification (CWE ID exact match, CVSS 3.1 vector string, exact mathematically correct score, and OWASP category)
 5. Detailed technical description (How it works, root cause)
-6. Proof of Concept (PoC) (Minimal reproducible steps or exploit payload based on the code)
-7. Impact assessment (What an attacker could achieve based on actual reachability)
+6. Proof of Concept (PoC) (Concrete scenario, not generic bullets)
+7. Impact assessment (What an attacker could achieve based on actual reachability and environment)
 8. Suggested fix (Pseudocode or secure approach)
 9. Timeline (Note that this was discovered via automated scanning today)
 10. Contact info / credit preference (Credit: AI Source Code Analyzer)
