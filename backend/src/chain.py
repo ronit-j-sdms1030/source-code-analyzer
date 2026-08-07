@@ -1272,7 +1272,7 @@ MANDATORY CVSS 3.1 MATH RULES - apply BEFORE choosing a score:
         if _is_generic_poc(processed):
             processed = _apply_fallback_poc(processed, rule_id)
         elif _has_hallucinated_poc(processed, finding):
-            processed = "[FLAGGED FOR REVIEW: Hallucinated PoC]\n" + processed
+            processed = "> ⚠️ **FLAGGED FOR REVIEW:** The Proof of Concept below may hallucinate elements not present in the source code.\n\n" + processed
             
     return processed
 
