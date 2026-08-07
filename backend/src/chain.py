@@ -76,6 +76,103 @@ _CWE_BY_OWASP = {
     "A10:2021 – Server-Side Request Forgery (SSRF)": ["CWE-918"],
 }
 
+def _force_classification_by_rule_id(rule_id: str) -> tuple[str | None, str | None]:
+    """Returns (OWASP_Category, CWE_ID) if a known rule strictly maps to them, otherwise (None, None)."""
+
+# ── NON-SECURITY RULE GATE ────────────────────────────────────────────────────
+# Rule-name patterns that are structurally incapable of being security
+# vulnerabilities. Checked before ANY LLM call, PoC generation, or report
+# generation. The rule_id is the cheapest, most reliable signal we have.
+#
+# Convention: lowercase the rule_id before matching.
+_NON_SECURITY_SUFFIXES = (
+    # Syntax / parse errors
+    "syntax-error", "syntax_error", "parse-error", "parse_error",
+    "invalid-syntax", "invalid_syntax",
+    # Style / formatting / linting
+    "style", "formatting", "format", "whitespace", "indentation",
+    "trailing-whitespace", "line-length", "line_length",
+    "missing-newline", "missing_newline", "blank-line", "blank_line",
+    # Code quality / dead code
+    "unused-variable", "unused_variable", "unused-import", "unused_import",
+    "unused-argument", "unused_argument", "dead-code", "dead_code",
+    "unreachable", "unnecessary",
+    # Type / runtime errors (not security)
+    "type-error", "type_error", "runtime-error", "runtime_error",
+    "attribute-error", "attribute_error", "name-error", "name_error",
+    # Performance
+    "performance", "inefficient",
+    # Deprecation / migration
+    "deprecated", "deprecation", "migrate", "migration",
+    # Test / build infrastructure
+    "test-helper", "build-rule",
+)
+
+_NON_SECURITY_SUBSTRINGS = (
+    "catch-syntax",
+    "syntax-error",
+    "syntax_error",
+    "parse-error",
+    "parse_error",
+    "eslint",            # ESLint formatting/style rules proxied via Semgrep
+    "pylint",            # same
+    "flake8",
+    ".style.",
+    ".formatting.",
+)
+
+
+def _is_non_security_rule(rule_id: str) -> bool:
+    """Return True if the Semgrep rule_id unambiguously identifies a NON-security
+    finding (syntax error, style violation, dead code, etc.) that should be
+    dropped before reaching the report / PoC / LLM pipeline.
+
+    This is intentionally conservative: only block rules whose *name itself*
+    proves the finding has no security implication. Anything ambiguous is
+    allowed through and handled by the downstream false-positive gate.
+    """
+    if not rule_id:
+        return False
+    lowered = rule_id.lower()
+    # Substring check (cheapest)
+    for sub in _NON_SECURITY_SUBSTRINGS:
+        if sub in lowered:
+            print(
+                f"[NON-SECURITY GATE] Dropping rule '{rule_id}' "
+                f"(matched non-security substring '{sub}').",
+                flush=True,
+            )
+            return True
+    # Suffix check — the leaf segment of dotted rule IDs, e.g.
+    # 'javascript.catch-syntax-error' → leaf = 'catch-syntax-error'
+    leaf = lowered.rsplit(".", 1)[-1]
+    for suffix in _NON_SECURITY_SUFFIXES:
+        if leaf == suffix or leaf.endswith("-" + suffix) or leaf.endswith("_" + suffix):
+            print(
+                f"[NON-SECURITY GATE] Dropping rule '{rule_id}' "
+                f"(matched non-security suffix '{suffix}').",
+                flush=True,
+            )
+            return True
+    return False
+
+    if not rule_id:
+        return None, None
+        
+    rule_lower = rule_id.lower()
+    if "sql" in rule_lower:
+        return "A03:2021 – Injection", "CWE-89"
+    if "xss" in rule_lower:
+        return "A03:2021 – Injection", "CWE-79"
+    if "secret" in rule_lower or "key" in rule_lower:
+        return "A07:2021 – Identification and Authentication Failures", "CWE-798"
+    if "ssti" in rule_lower:
+        return "A03:2021 – Injection", "CWE-1336"
+    if "user" in rule_lower and "docker" in rule_lower:
+        return "A05:2021 – Security Misconfiguration", "CWE-269"
+        
+    return None, None
+
 def _validate_and_correct_cwe(llm_cwe: str, owasp_category: str, rule_id: str = None) -> str:
     """
     Validates the LLM-generated CWE against the authoritative OWASP->CWE mapping.
@@ -83,19 +180,6 @@ def _validate_and_correct_cwe(llm_cwe: str, owasp_category: str, rule_id: str = 
     """
     valid_cwes = _CWE_BY_OWASP.get(owasp_category, [])
     
-    # Use rule_id to disambiguate if possible, overriding LLM even if in valid set
-    if rule_id:
-        if "sql" in rule_id.lower() and "CWE-89" in valid_cwes:
-            return "CWE-89"
-        elif "xss" in rule_id.lower() and "CWE-79" in valid_cwes:
-            return "CWE-79"
-        elif ("secret" in rule_id.lower() or "key" in rule_id.lower()) and "CWE-798" in valid_cwes:
-            return "CWE-798"
-        elif "ssti" in rule_id.lower() and "CWE-1336" in valid_cwes:
-            return "CWE-1336"
-        elif "user" in rule_id.lower() and "docker" in rule_id.lower() and "CWE-269" in valid_cwes:
-            return "CWE-269"
-
     if llm_cwe in valid_cwes:
         return llm_cwe
             
@@ -114,22 +198,37 @@ _GENERIC_POC_PHRASES = [
 ]
 
 def _has_hallucinated_poc(poc_text: str, finding: dict) -> bool:
-    """Checks if a PoC hallucinated SQLi or network interception for a secret finding that has no literals."""
+    """Checks if a PoC hallucinated claims about a non-literal finding by querying the LLM."""
     import re
-    message = finding.get("message", "").lower()
-    snippet = finding.get("lines", "")
+    # We must retrieve lines from extra if present, fallback to basic lines.
+    snippet = finding.get("extra", {}).get("lines", finding.get("lines", ""))
     
-    secrets_keywords = ['secret', 'password', 'token', 'credential', 'api.key', 'apikey', 'hardcoded']
-    if not any(kw in message for kw in secrets_keywords):
-        return False
-        
-    if re.search(r'["\']', snippet):
-        return False
-        
-    poc_lower = poc_text.lower()
-    hallucinated_concepts = ["sql injection", "sqli", "network interception", "intercept", "burp suite", "wireshark", "man in the middle", "mitm", "credential extraction"]
     
-    return any(concept in poc_lower for concept in hallucinated_concepts)
+    system_prompt = (
+        "You are a strict technical verification engine. "
+        "You will be given a code snippet and a Proof of Concept (PoC) describing an attack. "
+        "Your job is to read the PoC and determine if it is grounded in the provided code snippet. "
+        "A PoC is GROUNDED if it references variables, functions, endpoints, or logic that actually exist in the snippet. "
+        "A PoC is NOT_GROUNDED if it hallucinates or invents endpoints, parameters, variables, or exact string payloads that do not appear anywhere in the snippet. "
+        "Output ONLY 'GROUNDED' if the PoC is consistent with the snippet, or "
+        "'NOT_GROUNDED: <reason>' if the PoC hallucinates non-existent elements."
+    )
+    user_content = f"Code Snippet:\n```\n{snippet}\n```\n\nPoC:\n```\n{poc_text}\n```"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+    
+    from . import config
+    # Use the fast, cheaper model (or standard model) for the check
+    response = _call_cloud_llm(messages).strip()
+    
+    # Log every verdict for auditability (LLM-checking-LLM transparency)
+    print(f"[GROUNDEDNESS CHECK] {response}", flush=True)
+    
+    if response.startswith("NOT_GROUNDED"):
+        return True
+    return False
 
 def _is_generic_poc(poc_text: str) -> bool:
     """Flags PoC sections that are vague boilerplate rather than concrete steps."""
@@ -270,6 +369,9 @@ def _postprocess_report(report_text: str, rule_id: str = None) -> str:
                     f"{raw_vector} *(Computed Score: **{computed}** ({severity}))*"
                 )
 
+    # ── 1.5 RULE_ID OVERRIDES ─────────────────────────────────────────────────
+    forced_owasp, forced_cwe = _force_classification_by_rule_id(rule_id)
+    
     # ── 2. OWASP CATEGORY CORRECTION ─────────────────────────────────────────
     owasp_re = re.compile(
         r'(OWASP[\s\*]*(?:Top[\s\*]*10[\s\*]*)?(?:Category|Label|Classification)?[\s\*]*[:\u2013\-][\s\*]*)([^\n]+)',
@@ -279,25 +381,34 @@ def _postprocess_report(report_text: str, rule_id: str = None) -> str:
     final_owasp = None
     if owasp_match:
         llm_owasp = owasp_match.group(2).strip()
-        corrected = _resolve_owasp_category(llm_owasp)
-        if corrected:
-            final_owasp = corrected
-            if corrected != llm_owasp:
-                text = text[:owasp_match.start(2)] + corrected + text[owasp_match.end(2):]
+        if forced_owasp:
+            final_owasp = forced_owasp
+            if forced_owasp != llm_owasp:
+                text = text[:owasp_match.start(2)] + forced_owasp + text[owasp_match.end(2):]
         else:
-            final_owasp = llm_owasp
+            corrected = _resolve_owasp_category(llm_owasp)
+            if corrected:
+                final_owasp = corrected
+                if corrected != llm_owasp:
+                    text = text[:owasp_match.start(2)] + corrected + text[owasp_match.end(2):]
+            else:
+                final_owasp = llm_owasp
             
     # ── 3. CWE CORRECTION ────────────────────────────────────────────────────
     cwe_re = re.compile(
-        r'(CWE[\s\*]*[:\u2013\-]?[\s\*]*)(CWE-\d+)',
+        r'(CWE[\s\*]*[:\u2013\-]?[\s\*]*)(?:CWE[\s\*]*\-[\s\*]*)?(\d+)',
         re.IGNORECASE
     )
     cwe_match = cwe_re.search(text)
     if cwe_match and final_owasp:
-        llm_cwe = cwe_match.group(2).upper()
-        corrected_cwe = _validate_and_correct_cwe(llm_cwe, final_owasp, rule_id)
+        llm_cwe = f"CWE-{cwe_match.group(2)}"
+        if forced_cwe:
+            corrected_cwe = forced_cwe
+        else:
+            corrected_cwe = _validate_and_correct_cwe(llm_cwe, final_owasp, rule_id)
+            
         if corrected_cwe != llm_cwe:
-            text = text[:cwe_match.start(2)] + corrected_cwe + text[cwe_match.end(2):]
+            text = text[:cwe_match.start(2)] + corrected_cwe.split("-")[1] + text[cwe_match.end(2):]
 
     return text
 
@@ -1066,45 +1177,9 @@ Format the report using Markdown. Keep the tone professional, objective, and cal
 
     import re
 
-    # ── BUG FIX 1: FALSE POSITIVE GATE (PYTHON LAYER — SINGLE SOURCE OF TRUTH) ─
-    # The LLM is ONLY called when we are certain the finding is real.
-    # This prevents the model from contradicting itself (outputting "FALSE POSITIVE"
-    # while also generating a full 10-point report body in the same response).
-    value = code_snippet
-    m = re.search(r'=\s*["\']([^"\']+)["\']', code_snippet)
-    if m:
-        value = m.group(1)
-
-    is_dummy = False
-    dummy_reason = ""
-    if len(value) >= 8 and (value[:len(value)//2] == value[len(value)//2:]):
-        is_dummy = True
-        dummy_reason = f"The value `{value}` consists of a repeated substring, a common placeholder convention."
-    elif re.search(r'^(1234|abcd|0123|qwerty|asdf)', value.lower()):
-        is_dummy = True
-        dummy_reason = f"The value `{value}` follows a simple sequential or keyboard pattern."
-    elif any(x in value.lower() for x in ['insert_', 'your_', '<>', 'xxxxxx', 'changeme', 'placeholder']):
-        is_dummy = True
-        dummy_reason = f"The value `{value}` contains explicit placeholder text."
-    elif len(set(value)) <= 3 and len(value) > 5:
-        is_dummy = True
-        dummy_reason = f"The value `{value}` has extremely low entropy ({len(set(value))} unique chars)."
-    # Well-known vendor-published example / documentation keys — these are
-    # deliberately fake and safe, published by AWS, GCP, etc. in their own docs.
-    elif value in _KNOWN_VENDOR_EXAMPLE_KEYS:
-        is_dummy = True
-        dummy_reason = f"The value `{value}` is a well-known vendor-published documentation placeholder key."
-
     # Apply false-positive gate ONLY to secrets-class findings.
     # Non-secrets vuln classes (SSTI, SQLi, XSS, SSRF, etc.) are always real.
-    secrets_keywords = ['secret', 'password', 'token', 'credential', 'api.key', 'apikey', 'hardcoded']
-    is_secrets_finding = any(kw in message.lower() for kw in secrets_keywords)
-    if is_dummy and is_secrets_finding:
-        return (
-            f"**FALSE POSITIVE**\n"
-            f"The detected snippet `{code_snippet.strip()}` is clearly a dummy placeholder "
-            f"and not a real hardcoded credential. {dummy_reason} No actual sensitive data is exposed."
-        )
+    # (Removed inline false-positive gate logic; this is now handled uniformly in ingestion._run_semgrep)
 
     # BUG FIX 2 & 3: CWE constraint table + CVSS math rules injected into user message
     # so they apply to ALL finding types (SSTI, SQLi, XSS, secrets, etc.)
@@ -1324,25 +1399,7 @@ def evaluate_auto_fix(project_id: str, finding: dict) -> dict:
     file_path = finding.get("path", "")
     if not file_path:
         raise ValueError("Finding does not contain a file path.")
-
-    # ── FALSE POSITIVE GATE ──────────────────────────────────────────────────
-    # The Risk Assessment panel MUST NOT generate fix commentary for false
-    # positives. Otherwise the UI shows an actionable "Accept & Apply Fix"
-    # button for a finding the pipeline itself dismissed as non-real.
-    code_snippet = finding.get("extra", {}).get("lines", "")
-    message_text = finding.get("extra", {}).get("message", "")
-    if _is_false_positive(code_snippet, message_text):
-        return {
-            "false_positive": True,
-            "risk_assessment": (
-                "### ✅ No Action Needed\n"
-                "This finding was classified as a **false positive** — "
-                "the code snippet contains a placeholder or dummy value, not a real secret or vulnerability.\n\n"
-                "No fix needs to be applied. The \"Accept & Apply Fix\" action has been disabled."
-            ),
-            "fixed_content": None
-        }
-    # ── END GATE ─────────────────────────────────────────────────────────────
+        
     
     message = finding.get("extra", {}).get("message", "No message provided")
     line = finding.get("start", {}).get("line", "?")

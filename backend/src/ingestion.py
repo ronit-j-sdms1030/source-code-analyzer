@@ -129,6 +129,27 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
                         finding["extra"] = {}
                     finding["extra"]["lines"] = "[UNABLE TO EXTRACT VALUE]"
                     
+            # ── FALSE POSITIVE GATE ───────────────────────────────────────────
+            from .chain import _is_false_positive, _is_non_security_rule
+            valid_findings = []
+            suppressed_findings = []
+            
+            for finding in data.get("results", []):
+                rule_id = finding.get("check_id", "")
+                if _is_non_security_rule(rule_id):
+                    suppressed_findings.append(finding)
+                    continue
+
+                snippet = finding.get("extra", {}).get("lines", "")
+                message = finding.get("message") or finding.get("extra", {}).get("message", "")
+                path = finding.get("path", "")
+                
+                if _is_false_positive(snippet, message, path):
+                    suppressed_findings.append(finding)
+                    continue
+                    
+                valid_findings.append(finding)
+                
                 sev = finding.get("extra", {}).get("severity", "").lower()
                 if sev == "error" or sev == "high":
                     counts["high"] += 1
@@ -137,9 +158,17 @@ def _run_semgrep(project_id: str, repo_path: str) -> dict:
                 else:
                     counts["low"] += 1
                     
-            # Save the fixed relative paths back to disk
+            data["results"] = valid_findings
+            
+            # Write valid findings
             with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+                
+            # Write suppressed findings for auditability
+            if suppressed_findings:
+                suppressed_path = os.path.join(config.REPORTS_DIR, f"suppressed_findings_{project_id}.json")
+                with open(suppressed_path, "w", encoding="utf-8") as f:
+                    json.dump({"results": suppressed_findings}, f, indent=2)
 
             # ── Persist per-file MD5 hashes for staleness detection ──────────
             # Stored in project meta as { "file_hashes": { "rel/path": "hex" } }
