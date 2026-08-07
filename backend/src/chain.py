@@ -76,9 +76,6 @@ _CWE_BY_OWASP = {
     "A10:2021 – Server-Side Request Forgery (SSRF)": ["CWE-918"],
 }
 
-def _force_classification_by_rule_id(rule_id: str) -> tuple[str | None, str | None]:
-    """Returns (OWASP_Category, CWE_ID) if a known rule strictly maps to them, otherwise (None, None)."""
-
 # ── NON-SECURITY RULE GATE ────────────────────────────────────────────────────
 # Rule-name patterns that are structurally incapable of being security
 # vulnerabilities. Checked before ANY LLM call, PoC generation, or report
@@ -156,6 +153,8 @@ def _is_non_security_rule(rule_id: str) -> bool:
             return True
     return False
 
+def _force_classification_by_rule_id(rule_id: str) -> tuple[str | None, str | None]:
+    """Returns (OWASP_Category, CWE_ID) if a known rule strictly maps to them, otherwise (None, None)."""
     if not rule_id:
         return None, None
         
