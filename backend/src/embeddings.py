@@ -13,7 +13,7 @@ def _get_model():
         
     return TextEmbedding(model_name=model_name, threads=None)
 
-def embed_chunks(texts: list) -> list:
+def embed_chunks(texts: list, progress_callback=None) -> list:
     """Converts a list of code chunk strings into vector embeddings using fastembed."""
     if not texts:
         return []
@@ -24,7 +24,15 @@ def embed_chunks(texts: list) -> list:
     
     # FastEmbed returns a generator of numpy arrays. We convert them to lists of floats for ChromaDB.
     embeddings_generator = model.embed(texts)
-    return [embedding.tolist() for embedding in embeddings_generator]
+    
+    results = []
+    total = len(texts)
+    for i, embedding in enumerate(embeddings_generator):
+        results.append(embedding.tolist())
+        if progress_callback:
+            progress_callback(i + 1, total)
+            
+    return results
 
 def embed_query(text: str) -> list:
     return embed_chunks([text])[0]

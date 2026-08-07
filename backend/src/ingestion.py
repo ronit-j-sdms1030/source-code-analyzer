@@ -251,7 +251,12 @@ def _run_pipeline(project_id: str, url: str, token: str = ""):
             print(f"Graph build error: {e}")
 
         # [5] Embedder — chunk -> vector
-        vectors = embed_chunks([c["text"] for c in chunks])
+        def _update_embed_progress(current, total):
+            with _lock:
+                if project_id in _projects:
+                    _projects[project_id]["embedProgress"] = int((current / total) * 100)
+                    
+        vectors = embed_chunks([c["text"] for c in chunks], progress_callback=_update_embed_progress)
         _set_stage(project_id, 5)
 
         # [6] Vector writer — persist to ChromaDB (per-repo collection)

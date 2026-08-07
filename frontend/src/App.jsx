@@ -278,7 +278,7 @@ export default function SourceCodeAnalyzer() {
             <div className="indexing-view">
               <div className="empty-eyebrow">INDEXING · {selected.name}</div>
               <h2 className="indexing-title">Turning a repository into searchable vectors</h2>
-              <PipelineRail stageIndex={selected.stageIndex} />
+              <PipelineRail stageIndex={selected.stageIndex} embedProgress={selected.embedProgress} />
               <p className="indexing-note">
                 Shallow clone → collect .py files → chunk by function/class → embed → persist to ChromaDB.
                 This repo will stay indexed on disk once complete.

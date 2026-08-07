@@ -17,7 +17,8 @@ services:
     networks:
       - sonarnet
     depends_on:
-      - sonar-db
+      sonar-db:
+        condition: service_healthy
 
   sonar-db:
     image: postgres:15
@@ -26,6 +27,11 @@ services:
       - POSTGRES_USER=sonar
       - POSTGRES_PASSWORD=sonar
       - POSTGRES_DB=sonar
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     volumes:
       - postgresql:/var/lib/postgresql
       - postgresql_data:/var/lib/postgresql/data

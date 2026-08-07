@@ -11,7 +11,6 @@ from .vectorstore import query_chunks
 _KNOWN_VENDOR_EXAMPLE_KEYS = {
     # AWS — official AWS documentation example keys
     "AKIAIOSFODNN7EXAMPLE",
-    "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
     # GCP — placeholder service account keys used in GCP documentation
     "YOUR_API_KEY",
     "AIzaSyD-EXAMPLE-KEY",
@@ -113,6 +112,24 @@ _GENERIC_POC_PHRASES = [
     "an attacker can create a container",
     "a specific curl command or payload"
 ]
+
+def _has_hallucinated_poc(poc_text: str, finding: dict) -> bool:
+    """Checks if a PoC hallucinated SQLi or network interception for a secret finding that has no literals."""
+    import re
+    message = finding.get("message", "").lower()
+    snippet = finding.get("lines", "")
+    
+    secrets_keywords = ['secret', 'password', 'token', 'credential', 'api.key', 'apikey', 'hardcoded']
+    if not any(kw in message for kw in secrets_keywords):
+        return False
+        
+    if re.search(r'["\']', snippet):
+        return False
+        
+    poc_lower = poc_text.lower()
+    hallucinated_concepts = ["sql injection", "sqli", "network interception", "intercept", "burp suite", "wireshark", "man in the middle", "mitm", "credential extraction"]
+    
+    return any(concept in poc_lower for concept in hallucinated_concepts)
 
 def _is_generic_poc(poc_text: str) -> bool:
     """Flags PoC sections that are vague boilerplate rather than concrete steps."""
@@ -510,7 +527,11 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
         else:
             intent_data = {
                 "intent": "fix_request" if is_fix else "specific_finding", 
-                "entities": {"finding_id": resolved_findings[0].get("finding_id")}
+                "entities": {
+                    "finding_id": resolved_findings[0].get("finding_id"),
+                    "file_path": resolved_findings[0].get("path", ""),
+                    "line_number": resolved_findings[0].get("start", {}).get("line", "")
+                }
             }
     else:
         intent_data = classify_intent(history, question)
@@ -705,7 +726,7 @@ def _handle_fix_request(project_id: str, question: str, session_id: str, history
         return {"answer": ans, "sources": [], "debug_context": debug_context}
     # ── END GATE ─────────────────────────────────────────────────────────────
 
-    file_path = finding_meta.get("file_path", "")
+    file_path = finding_meta.get("file_path", "") or finding_meta.get("path", "")
     full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
     if not os.path.exists(full_path):
         ans = f"Cannot apply fix: file {file_path} not found on disk."
@@ -787,7 +808,8 @@ def _handle_multiple_fix_requests(project_id: str, question: str, session_id: st
     sources = set()
     
     for idx, finding_meta in enumerate(finding_metas):
-        title = f"### Fix for Finding {idx + 1} (`{finding_meta.get('file_path')}`)\n\n"
+        title_path = finding_meta.get('file_path') or finding_meta.get('path')
+        title = f"### Fix for Finding {idx + 1} (`{title_path}`)\n\n"
         
         fp_status = finding_meta.get("status", "") or ""
         fp_message = finding_meta.get("message", "") or ""
@@ -795,7 +817,7 @@ def _handle_multiple_fix_requests(project_id: str, question: str, session_id: st
             combined_answers.append(title + "⚠️ **No action needed.** This finding was classified as a false positive.")
             continue
             
-        file_path = finding_meta.get("file_path", "")
+        file_path = finding_meta.get("file_path", "") or finding_meta.get("path", "")
         full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
         if not os.path.exists(full_path):
             combined_answers.append(title + f"Cannot apply fix: file {file_path} not found on disk.")
@@ -857,34 +879,106 @@ def _handle_multiple_fix_requests(project_id: str, question: str, session_id: st
     return res
 
 
-def _is_false_positive(code_snippet: str, message: str) -> bool:
+def _log_suppression(file_path: str, snippet: str, reason: str):
+    import os
+    from . import config
+    log_file = os.path.join(config.DATA_DIR, "suppressions.log")
+    with open(log_file, "a") as f:
+        f.write(f"FILE: {file_path} | REASON: {reason} | SNIPPET: {snippet}\n")
+
+
+def _is_false_positive(code_snippet: str, message: str, file_path: str = "") -> bool:
     """Shared false-positive gate used by all content-generation paths.
 
     Returns True ONLY for secrets-class findings whose snippet looks like
-    a placeholder. Non-secrets vuln classes (SSTI, SQLi, XSS, etc.) always
-    return False — they are never false positives.
+    a placeholder OR is read from a non-literal runtime source.
     """
     import re
+    import ast
+    
     secrets_keywords = ['secret', 'password', 'token', 'credential', 'api.key', 'apikey', 'hardcoded']
     if not any(kw in message.lower() for kw in secrets_keywords):
         return False  # Not a secrets finding — skip the placeholder gate entirely
 
+    code_snippet_stripped = code_snippet.strip()
+
+    # 1. Non-literal check (Python AST)
+    try:
+        tree = ast.parse(code_snippet_stripped)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                if not isinstance(node.value, ast.Constant):
+                    # RHS is not a constant literal
+                    _log_suppression(file_path, code_snippet, "Python AST: Non-literal assignment")
+                    return True
+    except SyntaxError:
+        pass
+
+    # 2. JS/TS Heuristics (Regex)
+    
+    # Destructuring: `const {password} = req.body;`
+    if re.search(r'^\s*(const|let|var)\s+\{[^}]+\}\s*=\s*(req|request|process)\.', code_snippet_stripped):
+        _log_suppression(file_path, code_snippet, "JS Heuristic: Destructuring from non-literal")
+        return True
+    
+    # Function params: `function login(password) {`
+    if re.search(r'(function\s+\w*\s*\(|=>\s*\{?|\bdef\s+\w+\s*\().*\b(password|secret|token|api_?key)\b', code_snippet_stripped, re.IGNORECASE):
+        if not re.search(r'=\s*["\']', code_snippet_stripped): # Ensure it's not a default param literal
+            _log_suppression(file_path, code_snippet, "JS Heuristic: Function parameter")
+            return True
+
+    # RHS checks
+    rhs_match = re.search(r'=\s*(.+);?$', code_snippet_stripped)
+    if rhs_match:
+        rhs = rhs_match.group(1).strip().rstrip(';')
+        
+        # Check if the RHS contains a string literal anywhere
+        if not re.search(r'["\']', rhs):
+            # No literal string found on the RHS of an assignment
+            _log_suppression(file_path, code_snippet, "JS Heuristic: No string literal on RHS")
+            return True
+            
+        # specifically check for known non-literal patterns even if a literal is present
+        # e.g. `document.getElementById('apiKeyInput').value` has a literal but is a DOM read
+        non_literal_patterns = [
+            r'^e\.target\..*\.value$',
+            r'^document\.getElementById\(.*\)\.value$',
+            r'^formData\.get\(.*\)$',
+            r'^req(uest)?\.(body|params|query|headers|form|args)',
+            r'^process\.env\.',
+            r'^os\.environ\.get',
+            r'^kwargs\.get',
+            r'^localStorage\.getItem',
+            r'^sessionStorage\.getItem',
+            r'^\w+\(\)$' # function call like someFunction()
+        ]
+        if any(re.search(pat, rhs) for pat in non_literal_patterns):
+            _log_suppression(file_path, code_snippet, f"JS Heuristic: Matched non-literal RHS pattern")
+            return True
+
+    # 3. Proceed to Placeholder checks
     value = code_snippet
-    m = re.search(r'=\s*["\']([^"\']+)["\']', code_snippet)
+    m = re.search(r'=\s*.*?["\']([^"\']+)["\']', code_snippet_stripped)
     if m:
         value = m.group(1)
 
     # Well-known vendor documentation placeholder keys
     if value in _KNOWN_VENDOR_EXAMPLE_KEYS:
+        _log_suppression(file_path, code_snippet, "Placeholder: Known vendor key")
         return True
     if len(value) >= 8 and (value[:len(value)//2] == value[len(value)//2:]):
+        _log_suppression(file_path, code_snippet, "Placeholder: Repeated string")
         return True
     if re.search(r'^(1234|abcd|0123|qwerty|asdf)', value.lower()):
+        _log_suppression(file_path, code_snippet, "Placeholder: Weak pattern")
         return True
     if any(x in value.lower() for x in ['insert_', 'your_', '<>', 'xxxxxx', 'changeme', 'placeholder']):
+        _log_suppression(file_path, code_snippet, "Placeholder: Common placeholder keyword")
         return True
     if len(set(value)) <= 3 and len(value) > 5:
+        _log_suppression(file_path, code_snippet, "Placeholder: Low entropy string")
         return True
+        
     return False
 
 
@@ -1093,8 +1187,8 @@ MANDATORY CVSS 3.1 MATH RULES - apply BEFORE choosing a score:
     rule_id = finding.get("check_id", "")
     processed = _postprocess_report(initial_report, rule_id=rule_id)
     
-    if _is_generic_poc(processed):
-        reprompt_msg = "Your PoC section is too generic. Rewrite Section 6 (Proof of Concept) to provide a concrete, step-by-step scenario grounded in the actual code snippet provided. Do not use generic phrases like 'a specific payload' or 'a specific curl command'."
+    if _is_generic_poc(processed) or _has_hallucinated_poc(processed, finding):
+        reprompt_msg = "Your PoC section is too generic or hallucinates attack vectors not present in the code. Rewrite Section 6 (Proof of Concept) to provide a concrete, step-by-step scenario grounded in the actual code snippet provided. Do not use generic phrases like 'a specific payload', and do not describe network interception or SQL injection if the snippet does not contain those vulnerabilities."
         messages.append({"role": "assistant", "content": initial_report})
         messages.append({"role": "user", "content": reprompt_msg})
         
@@ -1103,6 +1197,8 @@ MANDATORY CVSS 3.1 MATH RULES - apply BEFORE choosing a score:
         
         if _is_generic_poc(processed):
             processed = _apply_fallback_poc(processed, rule_id)
+        elif _has_hallucinated_poc(processed, finding):
+            processed = "[FLAGGED FOR REVIEW: Hallucinated PoC]\n" + processed
             
     return processed
 

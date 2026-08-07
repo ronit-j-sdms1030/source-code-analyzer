@@ -102,8 +102,9 @@ Focus on preserving context, stated preferences, and current context state.
 
     messages = [{"role": "system", "content": prompt}]
     for msg in to_summarize:
-        role = "user" if msg["role"] == "user" else "assistant"
-        messages.append({"role": role, "content": msg["text"]})
+        role = "user" if msg.get("role") == "user" else "assistant"
+        content = msg.get("content", "")
+        messages.append({"role": role, "content": content})
 
     summary_text = _call_cloud_llm(messages)
 

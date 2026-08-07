@@ -112,6 +112,9 @@ def get_graph_context(project_id: str, file_path: str, max_hops: int = 1) -> str
         deps.update(graph[file_path].get("imports", []))
         deps.update(graph[file_path].get("imported_by", []))
         
+    if len(deps) == 1:
+        return ""
+        
     repo_path = os.path.join(config.REPOS_DIR, project_id)
     
     context_parts = []

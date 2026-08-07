@@ -16,8 +16,8 @@ def _ensure_sonar_setup() -> dict:
     base_url = "http://127.0.0.1:9000"
     
     # 1. Wait for SonarQube to be UP (can take 1-2 mins on fresh start)
-    print("Waiting for SonarQube to boot up on 127.0.0.1:9000...")
-    for _ in range(60):
+    print("Waiting for SonarQube to boot up on 127.0.0.1:9000 (this can take 3-5 minutes on first run)...")
+    for _ in range(100):
         try:
             r = requests.get(f"{base_url}/api/system/status", timeout=2)
             if r.status_code == 200 and r.json().get("status") == "UP":
@@ -26,7 +26,7 @@ def _ensure_sonar_setup() -> dict:
             pass
         time.sleep(3)
     else:
-        raise Exception("SonarQube did not become available in time.")
+        raise Exception("SonarQube did not become available within 5 minutes. This might happen on slower hardware during a cold boot. Please check 'docker logs sonarqube' for details.")
         
     print("SonarQube is UP. Setting up secure credentials...")
     
