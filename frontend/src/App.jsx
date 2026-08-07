@@ -170,6 +170,13 @@ export default function SourceCodeAnalyzer() {
           return fresh ? { ...fresh, messages: p.messages } : p;
         })
       );
+      // Also keep reportProject in sync so the modal's project.vulnerabilities
+      // prop is always current (enables stale-report reconciliation on re-open).
+      setReportProject((prev) => {
+        if (!prev) return prev;
+        const fresh = list.find(l => l.id === prev.id);
+        return fresh ? { ...fresh, messages: prev.messages } : prev;
+      });
     } catch(err) {
       console.error("Failed to refresh project data", err);
     }
