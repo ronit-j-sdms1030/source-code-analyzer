@@ -51,7 +51,24 @@ def check_auth():
 @app.get("/projects")
 @auth_required
 def projects():
-    return jsonify(list_projects())
+    from src.ingestion import _projects, _lock
+    db_list = list_projects()
+    # Merge in-memory _projects (always up-to-date) over ChromaDB data
+    # so that vulnerability counts updated by apply_fix are reflected
+    # immediately without waiting for ChromaDB to be written.
+    with _lock:
+        mem = dict(_projects)  # snapshot
+    if mem:
+        merged = []
+        for p in db_list:
+            pid = p.get("id")
+            if pid and pid in mem:
+                # In-memory copy wins for mutable fields like vulnerabilities
+                merged.append({**p, **{k: v for k, v in mem[pid].items() if k != "messages"}})
+            else:
+                merged.append(p)
+        return jsonify(merged)
+    return jsonify(db_list)
 
 
 @app.post("/ingest")
@@ -307,7 +324,7 @@ def auto_fix_vulnerability(project_id):
                 if len(report_data["results"]) < original_len:
                     with open(report_path, "w", encoding="utf-8") as f:
                         json.dump(report_data, f, indent=2)
-                        
+
                     # Update in-memory counts and db so badges update immediately
                     counts = {"high": 0, "medium": 0, "low": 0}
                     for res in report_data["results"]:
@@ -315,13 +332,19 @@ def auto_fix_vulnerability(project_id):
                         if sev in ("error", "high"): counts["high"] += 1
                         elif sev in ("warning", "medium"): counts["medium"] += 1
                         else: counts["low"] += 1
-                        
+
                     from src.ingestion import _projects, _lock
+                    from src.vectorstore import upsert_project_meta, get_project_meta
                     with _lock:
                         if project_id in _projects:
-                            from src.vectorstore import upsert_project_meta
                             _projects[project_id]["vulnerabilities"] = counts
                             upsert_project_meta(project_id, {**_projects[project_id]})
+                        else:
+                            # Project not in memory (e.g. after server restart) —
+                            # load from ChromaDB, patch counts, write back.
+                            stored = get_project_meta(project_id) or {}
+                            stored["vulnerabilities"] = counts
+                            upsert_project_meta(project_id, stored)
                             
                     # Inject the fix into the chat history so the LLM remembers!
                     from src.chain import _append_history
@@ -427,11 +450,17 @@ def apply_evaluated_fix(project_id):
                         else: counts["low"] += 1
 
                     from src.ingestion import _projects, _lock
+                    from src.vectorstore import upsert_project_meta, get_project_meta
                     with _lock:
                         if project_id in _projects:
-                            from src.vectorstore import upsert_project_meta
                             _projects[project_id]["vulnerabilities"] = counts
                             upsert_project_meta(project_id, {**_projects[project_id]})
+                        else:
+                            # Project not in memory (e.g. after server restart) —
+                            # load from ChromaDB, patch counts, write back.
+                            stored = get_project_meta(project_id) or {}
+                            stored["vulnerabilities"] = counts
+                            upsert_project_meta(project_id, stored)
 
                     from src.chain import _append_history
                     fix_desc = finding.get("extra", {}).get("message", "")
