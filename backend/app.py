@@ -289,12 +289,18 @@ def auto_fix_vulnerability(project_id):
             
             if "results" in report_data:
                 original_len = len(report_data["results"])
-                # Filter out the matching finding
+                # Coerce line numbers to int on both sides so that a frontend-
+                # sent float (e.g. 42.0) cannot silently miss an int (42).
+                finding_line = int(finding.get("start", {}).get("line") or 0)
+                finding_msg  = finding.get("extra", {}).get("message", "")
+                finding_path = finding.get("path", "")
                 report_data["results"] = [
-                    r for r in report_data["results"] 
-                    if not (r.get("path") == finding.get("path") and 
-                            r.get("start", {}).get("line") == finding.get("start", {}).get("line") and 
-                            r.get("extra", {}).get("message") == finding.get("extra", {}).get("message"))
+                    r for r in report_data["results"]
+                    if not (
+                        r.get("path") == finding_path
+                        and int(r.get("start", {}).get("line") or 0) == finding_line
+                        and r.get("extra", {}).get("message", "") == finding_msg
+                    )
                 ]
                 
                 # If we actually removed something, save it back
@@ -319,8 +325,11 @@ def auto_fix_vulnerability(project_id):
                             
                     # Inject the fix into the chat history so the LLM remembers!
                     from src.chain import _append_history
-                    msg = f"**✨ Fix Applied:** Fixed {finding.get('path', 'unknown file')} ({finding.get('extra', {}).get('message', '')}).\nDetails: {result.get('message', '')}"
-                    _append_history(project_id, {"role": "assistant", "text": msg})
+                    fix_desc = finding.get("extra", {}).get("message", "")
+                    _append_history(project_id, {
+                        "role": "assistant",
+                        "text": f"**✨ Fix Applied:** Fixed `{finding.get('path', 'unknown file')}` ({fix_desc}).\nDetails: {result.get('message', '')}"
+                    })
 
         return jsonify(result)
     except Exception as e:
@@ -349,6 +358,7 @@ def evaluate_fix(project_id):
 def apply_evaluated_fix(project_id):
     import os
     import json
+    import sys
     
     body = request.get_json(force=True)
     finding = (body or {}).get("finding")
@@ -356,73 +366,96 @@ def apply_evaluated_fix(project_id):
     
     if not finding or not fixed_content:
         return jsonify({"error": "finding and fixed_content are required"}), 400
+        
+    file_path = finding.get("path", "")
+    if not file_path:
+        return jsonify({"error": "Finding does not contain a file path."}), 400
 
-    # ── FALSE POSITIVE GATE ────────────────────────────────────────────────────
-    # Prevent disk writes when fixed_content is None (returned by evaluate_auto_fix
-    # for false-positive findings) or when the finding itself is a placeholder.
-    from src.chain import _is_false_positive
-    code_snippet = (finding.get("extra") or {}).get("lines", "")
-    message_text = (finding.get("extra") or {}).get("message", "")
-    if not fixed_content or _is_false_positive(code_snippet, message_text):
-        return jsonify({
-            "error": "This finding was classified as a false positive. No fix was applied."
-        }), 400
-    # ── END GATE ───────────────────────────────────────────────────────────────
-        
+    full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
+    # Path traversal guard
+    if not os.path.normpath(full_path).startswith(os.path.realpath(os.path.join(config.REPOS_DIR, project_id))):
+        return jsonify({"error": "Invalid file path"}), 400
+
+    if not os.path.exists(full_path):
+        return jsonify({"error": f"File not found on disk: {file_path}"}), 400
+
+    # ── Write the fixed content to disk ─────────────────────────────────────
     try:
-        file_path = finding.get("path", "")
-        if not file_path:
-            return jsonify({"error": "Finding does not contain a file path."}), 400
-            
-        full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
-        if not os.path.exists(full_path):
-            return jsonify({"error": f"File not found on disk: {file_path}"}), 400
-            
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(fixed_content)
-            
-        result = {"status": "success", "file": file_path, "message": "Applied evaluated fix successfully."}
-        
-        # Remove the finding from the report.json to keep it in sync
+        with open(full_path, "w", encoding="utf-8") as fh:
+            fh.write(fixed_content)
+    except OSError as write_err:
+        print(
+            f"[apply_fix ERROR] Failed to write fix to '{full_path}': {write_err}",
+            file=sys.stderr, flush=True
+        )
+        return jsonify({"error": f"Could not write fix to file '{file_path}': {write_err}"}), 500
+
+    removed_from_report = False
+    try:
+        # ── Remove the finding from report.json to keep it in sync ──────────
         report_path = os.path.join(config.REPORTS_DIR, f"{project_id}.json")
         if os.path.exists(report_path):
-            with open(report_path, "r", encoding="utf-8") as f:
-                report_data = json.load(f)
-            
+            with open(report_path, "r", encoding="utf-8") as fh:
+                report_data = json.load(fh)
+
             if "results" in report_data:
                 original_len = len(report_data["results"])
+                # Coerce line numbers to int on both sides so that a frontend-
+                # sent float (e.g. 42.0) cannot silently miss an int (42).
+                finding_line = int(finding.get("start", {}).get("line") or 0)
+                finding_msg  = finding.get("extra", {}).get("message", "")
+                finding_path = finding.get("path", "")
                 report_data["results"] = [
-                    r for r in report_data["results"] 
-                    if not (r.get("path") == finding.get("path") and 
-                            r.get("start", {}).get("line") == finding.get("start", {}).get("line") and 
-                            r.get("extra", {}).get("message") == finding.get("extra", {}).get("message"))
+                    r for r in report_data["results"]
+                    if not (
+                        r.get("path") == finding_path
+                        and int(r.get("start", {}).get("line") or 0) == finding_line
+                        and r.get("extra", {}).get("message", "") == finding_msg
+                    )
                 ]
-                
+
                 if len(report_data["results"]) < original_len:
-                    with open(report_path, "w", encoding="utf-8") as f:
-                        json.dump(report_data, f, indent=2)
-                        
+                    removed_from_report = True
+                    with open(report_path, "w", encoding="utf-8") as fh:
+                        json.dump(report_data, fh, indent=2)
+
                     counts = {"high": 0, "medium": 0, "low": 0}
                     for res in report_data["results"]:
                         sev = res.get("extra", {}).get("severity", "").lower()
                         if sev in ("error", "high"): counts["high"] += 1
                         elif sev in ("warning", "medium"): counts["medium"] += 1
                         else: counts["low"] += 1
-                        
+
                     from src.ingestion import _projects, _lock
                     with _lock:
                         if project_id in _projects:
                             from src.vectorstore import upsert_project_meta
                             _projects[project_id]["vulnerabilities"] = counts
                             upsert_project_meta(project_id, {**_projects[project_id]})
-                            
-                    from src.chain import _append_history
-                    msg = f"**✨ Fix Applied:** Fixed {finding.get('path', 'unknown file')} ({finding.get('extra', {}).get('message', '')}).\nDetails: {result.get('message', '')}"
-                    _append_history(project_id, {"role": "assistant", "text": msg})
 
-        return jsonify(result)
+                    from src.chain import _append_history
+                    fix_desc = finding.get("extra", {}).get("message", "")
+                    _append_history(project_id, {
+                        "role": "assistant",
+                        "text": f"**✨ Fix Applied:** Fixed `{file_path}` ({fix_desc})."
+                    })
+                else:
+                    print(
+                        f"[apply_fix WARN] Finding not matched in report.json "
+                        f"(path={finding_path!r}, line={finding_line}, msg={finding_msg!r}). "
+                        "File was written but report was not updated.",
+                        file=sys.stderr, flush=True
+                    )
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Report update is best-effort; the file fix already succeeded.
+        print(f"[apply_fix WARN] Could not update report.json: {e}", file=sys.stderr, flush=True)
+
+    return jsonify({
+        "status": "success",
+        "file": file_path,
+        "message": "Applied evaluated fix successfully.",
+        "removed_from_report": removed_from_report,
+    })
 
 @app.post("/projects/<project_id>/vulnerabilities/rescan")
 @auth_required
