@@ -1,9 +1,9 @@
 flask>=3.0
-gitpython>=3.1
-langchain>=0.2
+flask-cors>=4.0
+chromadb>=0.4.0
 langchain-text-splitters>=0.2.0
-sentence-transformers>=3.0
-chromadb>=0.5
+fastembed>=0.2.0
+gitpython>=3.1
 requests>=2.31
 python-dotenv>=1.0.0
 semgrep>=1.0.0
