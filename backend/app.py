@@ -505,7 +505,15 @@ def push_fixes(project_id):
         
     data = request.json or {}
     token = data.get("token", "").strip()
-    branch_name = data.get("branch", "").strip() or f"security-fixes-{uuid.uuid4().hex[:6]}"
+    raw_branch = data.get("branch", "").strip()
+    # Sanitize: remove/replace characters that git rejects in ref names
+    # (spaces, \n, ~, ^, :, ?, *, [, \) and sequences like ".." or "@{"
+    import re as _re
+    safe_branch = _re.sub(r'[\s~^:?*\[\\]+', '-', raw_branch)
+    safe_branch = _re.sub(r'\.{2,}', '-', safe_branch)
+    safe_branch = _re.sub(r'-{2,}', '-', safe_branch)
+    safe_branch = safe_branch.strip('-.')
+    branch_name = safe_branch or f"security-fixes-{uuid.uuid4().hex[:6]}"
     commit_message = data.get("commit_message", "").strip() or "Apply automated security fixes"
     
     try:

@@ -311,7 +311,16 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
               className="action-btn"
               title="Push Fixes to a new GitHub Branch"
               onClick={async () => {
-                const branch = window.prompt("Enter a name for the new branch:", "security-fixes") || "security-fixes";
+                const rawBranch = window.prompt("Enter a name for the new branch:", "security-fixes") ?? "security-fixes";
+                // Sanitize: strip whitespace and replace characters git rejects in ref names
+                // (spaces, ~, ^, :, ?, *, [, \, .., @{, trailing .lock, etc.)
+                const branch = rawBranch
+                  .trim()
+                  .replace(/[\s~^:?*\[\\]+/g, "-")   // replace invalid chars with -
+                  .replace(/\.{2,}/g, "-")            // replace .. with -
+                  .replace(/-{2,}/g, "-")             // collapse multiple hyphens
+                  .replace(/^[-.]|[-.]$/g, "")        // strip leading/trailing - or .
+                  || "security-fixes";
                 const commitMessage = window.prompt("Enter a commit message:", "Apply automated security fixes") || "Apply automated security fixes";
                 
                 let token = "";
