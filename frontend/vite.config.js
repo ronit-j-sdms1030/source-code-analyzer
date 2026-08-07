@@ -12,10 +12,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:5000",
-      "/ingest": "http://localhost:5000",
-      "/chat": "http://localhost:5000",
-      "/projects": "http://localhost:5000",
+      "/api": { target: "http://localhost:5000", timeout: 300000, proxyTimeout: 300000 },
+      "/ingest": { target: "http://localhost:5000", timeout: 300000, proxyTimeout: 300000 },
+      "/chat": { target: "http://localhost:5000", timeout: 300000, proxyTimeout: 300000 },
+      "/projects": { target: "http://localhost:5000", timeout: 300000, proxyTimeout: 300000 },
     },
   },
 });
