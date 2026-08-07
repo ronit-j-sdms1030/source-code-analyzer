@@ -311,17 +311,25 @@ def auto_fix_vulnerability(project_id):
                 finding_line = int(finding.get("start", {}).get("line") or 0)
                 finding_msg  = finding.get("extra", {}).get("message", "")
                 finding_path = finding.get("path", "")
-                report_data["results"] = [
-                    r for r in report_data["results"]
-                    if not (
+
+                # Partition: collect matched (to archive) vs remaining
+                from datetime import datetime as _dt
+                matched, remaining = [], []
+                for r in report_data["results"]:
+                    if (
                         r.get("path") == finding_path
                         and int(r.get("start", {}).get("line") or 0) == finding_line
                         and r.get("extra", {}).get("message", "") == finding_msg
-                    )
-                ]
-                
+                    ):
+                        matched.append({**r, "fixed_at": _dt.utcnow().isoformat() + "Z"})
+                    else:
+                        remaining.append(r)
+
+                report_data["results"] = remaining
+                report_data.setdefault("fixed", []).extend(matched)
+
                 # If we actually removed something, save it back
-                if len(report_data["results"]) < original_len:
+                if len(remaining) < original_len:
                     with open(report_path, "w", encoding="utf-8") as f:
                         json.dump(report_data, f, indent=2)
 
@@ -428,16 +436,23 @@ def apply_evaluated_fix(project_id):
                 finding_line = int(finding.get("start", {}).get("line") or 0)
                 finding_msg  = finding.get("extra", {}).get("message", "")
                 finding_path = finding.get("path", "")
-                report_data["results"] = [
-                    r for r in report_data["results"]
-                    if not (
+
+                from datetime import datetime as _dt
+                matched, remaining = [], []
+                for r in report_data["results"]:
+                    if (
                         r.get("path") == finding_path
                         and int(r.get("start", {}).get("line") or 0) == finding_line
                         and r.get("extra", {}).get("message", "") == finding_msg
-                    )
-                ]
+                    ):
+                        matched.append({**r, "fixed_at": _dt.utcnow().isoformat() + "Z"})
+                    else:
+                        remaining.append(r)
 
-                if len(report_data["results"]) < original_len:
+                report_data["results"] = remaining
+                report_data.setdefault("fixed", []).extend(matched)
+
+                if len(remaining) < original_len:
                     removed_from_report = True
                     with open(report_path, "w", encoding="utf-8") as fh:
                         json.dump(report_data, fh, indent=2)
