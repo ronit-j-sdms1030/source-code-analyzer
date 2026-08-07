@@ -1430,13 +1430,23 @@ Format your response EXACTLY like this:
 """
     
     from .graph import get_graph_context
-    graph_context = get_graph_context(project_id, file_path, max_hops=1)
+    try:
+        graph_context = get_graph_context(project_id, file_path, max_hops=1)
+    except Exception as e:
+        print(f"[Graph Error] {e}", flush=True)
+        graph_context = ""
     
     # Estimate token count (chars / 4) for logging
     full_path = os.path.join(config.REPOS_DIR, project_id, file_path)
     if os.path.exists(full_path):
-        with open(full_path, "r", encoding="utf-8") as f:
-            base_file_content = f.read()
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                base_file_content = f.read()
+        except UnicodeDecodeError:
+            with open(full_path, "r", encoding="latin-1") as f:
+                base_file_content = f.read()
+        except Exception as e:
+            return {"error": f"Failed to read file: {e}", "risk_assessment": "Could not read file."}
     else:
         base_file_content = ""
         
