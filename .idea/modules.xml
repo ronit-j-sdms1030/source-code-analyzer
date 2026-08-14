@@ -3,6 +3,9 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/source-code-analyzer-restructured.iml" filepath="$PROJECT_DIR$/.idea/source-code-analyzer-restructured.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/tenderai.iml" filepath="$PROJECT_DIR$/.idea/tenderai.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/tenderai@1.iml" filepath="$PROJECT_DIR$/.idea/tenderai@1.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/tenderai@2.iml" filepath="$PROJECT_DIR$/.idea/tenderai@2.iml" />
     </modules>
   </component>
 </project>

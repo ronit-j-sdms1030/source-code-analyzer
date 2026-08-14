@@ -1,25 +1,39 @@
 import pytest
 import sys
 import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.chain import _is_generic_poc, _has_hallucinated_poc, _apply_fallback_poc
+from unittest.mock import patch
 
-def test_poc_banned_phrase():
+def test_generic_poc_detection():
     assert _is_generic_poc("a specific curl command or payload can be used") == True
+    assert _is_generic_poc("curl -X POST -d 'test' http://localhost/") == False
 
-def test_poc_hallucinated_sqli():
-    finding = {"message": "exposed secret password", "lines": "const password = req.body.password;"}
-    assert _has_hallucinated_poc("the attacker can use sql injection", finding) == True
-
-def test_poc_concrete_and_grounded():
-    finding = {"message": "hardcoded api key", "lines": "API_KEY = '123'"}
-    # No banned phrase, no hallucination
-    assert _is_generic_poc("set AWS_SECRET_KEY = 'wJal...' in config.py:14") == False
-    assert _has_hallucinated_poc("set AWS_SECRET_KEY = 'wJal...' in config.py:14", finding) == False
+def test_hallucinated_poc_detection():
+    finding = {
+        "message": "Exposed Database Password",
+        "lines": "const password = e.target.password.value;"
+    }
+    
+    with patch("src.chain._call_cloud_llm") as mock_llm:
+        # 1. SQL Injection framing
+        mock_llm.return_value = "NOT_GROUNDED: The PoC claims SQL injection but the snippet is a DOM read."
+        assert _has_hallucinated_poc("the attacker can use sql injection", finding) == True
+        
+        # 2. Curl/grep from source framing (novel unseen phrasing)
+        mock_llm.return_value = "NOT_GROUNDED: The PoC claims to grep the file for a literal password, but no literal exists."
+        assert _has_hallucinated_poc("an attacker can download the JS file and grep for the hardcoded password", finding) == True
+        
+        # 3. Grounded PoC with no literals
+        mock_llm.return_value = "GROUNDED"
+        assert _has_hallucinated_poc("the attacker can read the user's password from the DOM element", finding) == False
 
 def test_poc_true_positive_not_flagged():
-    finding = {"message": "hardcoded api key", "lines": "API_KEY = '123'"}
+    finding = {
+        "message": "AWS Access Key",
+        "lines": "export AWS_SECRET_KEY='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'"
+    }
+    # True positives with literals should short-circuit before the LLM check.
+    assert _has_hallucinated_poc("set AWS_SECRET_KEY = 'wJal...' in config.py:14", finding) == False
     assert _has_hallucinated_poc("an attacker can intercept the hardcoded token over the network", finding) == False
 
 def test_fallback_poc_docker():
