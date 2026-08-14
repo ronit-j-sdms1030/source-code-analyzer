@@ -12,6 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Semgrep OSS
+        run: pip install semgrep
       - name: Ensure Semgrep OSS is installed
         run: |
           if ! command -v semgrep &> /dev/null; then
