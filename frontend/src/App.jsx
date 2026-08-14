@@ -5,7 +5,7 @@ import NewProjectPanel from "./components/NewProjectPanel";
 import ProjectCard from "./components/ProjectCard";
 import ChatPanel from "./components/ChatPanel";
 import VulnerabilityModal from "./components/VulnerabilityModal";
-import { listProjects, startIngest, deleteProject as apiDeleteProject, askQuestion as apiAskQuestion, pollIngestStatus, login, logout, checkAuth } from "./lib/api";
+import { listProjects, startIngest, deleteProject as apiDeleteProject, askQuestion as apiAskQuestion, getChatHistory, pollIngestStatus, login, logout, checkAuth } from "./lib/api";
 import starkLogo from "/stark.svg";
 
 /* ---------------------------------- login ---------------------------------- */
@@ -105,12 +105,34 @@ export default function SourceCodeAnalyzer() {
     loadProjects();
   }, []);
 
+  const _chatSessionKey = (projectId) => `chat_session_${projectId}`;
+
+  // Chat history lives server-side keyed by sessionId (see backend/src/memory.py),
+  // but the browser only remembers that sessionId for as long as this tab's React
+  // state is alive — a refresh wipes it. Persist it to localStorage so a reload can
+  // restore both the session (for LLM context continuity) and the visible messages.
+  const restoreChatSession = async (projectId) => {
+    const sessionId = localStorage.getItem(_chatSessionKey(projectId));
+    if (!sessionId) return;
+    try {
+      const { messages } = await getChatHistory(projectId, sessionId);
+      if (messages && messages.length) {
+        updateProject(projectId, { sessionId, messages });
+      } else {
+        updateProject(projectId, { sessionId });
+      }
+    } catch (err) {
+      console.error(`Failed to restore chat session for ${projectId}`, err);
+    }
+  };
+
   const loadProjects = () => {
     listProjects()
       .then((list) => {
         setProjects(list);
         if (list[0]) setSelectedId(list[0].id);
         list.filter((p) => p.status === "indexing").forEach((p) => watchIngest(p.id));
+        list.forEach((p) => restoreChatSession(p.id));
       })
       .catch((err) => console.error("Failed to load projects", err));
   };
@@ -154,6 +176,7 @@ export default function SourceCodeAnalyzer() {
       cancelPollers.current[id]();
       delete cancelPollers.current[id];
     }
+    localStorage.removeItem(_chatSessionKey(id));
     setProjects((prev) => {
       const next = prev.filter((p) => p.id !== id);
       setSelectedId((curr) => (curr === id ? (next[0] ? next[0].id : null) : curr));
@@ -192,6 +215,9 @@ export default function SourceCodeAnalyzer() {
     }));
     try {
       const { answer, sources, sessionId: returnedSessionId, evaluate_fix_payloads } = await apiAskQuestion(projectId, question, sessionId);
+      if (returnedSessionId) {
+        localStorage.setItem(_chatSessionKey(projectId), returnedSessionId);
+      }
       updateProject(projectId, (p) => {
         const msgs = [...p.messages];
         msgs[msgs.length - 1] = { role: "assistant", text: answer, sources: sources || [], evaluate_fix_payloads };

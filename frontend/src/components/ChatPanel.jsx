@@ -116,6 +116,9 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
   const scrollRef = useRef(null);
   
   const [qualityMetrics, setQualityMetrics] = useState(null);
+  const [qualityDetailView, setQualityDetailView] = useState(null); // null | "smells" | "duplications"
+  const [expandedSnippets, setExpandedSnippets] = useState({}); // { [key]: true } — which findings have their snippet toggled open
+  const toggleSnippet = (key) => setExpandedSnippets((prev) => ({ ...prev, [key]: !prev[key] }));
   const cancelPoll = useRef(null);
 
   const fetchQuality = async () => {
@@ -160,6 +163,7 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
   const handleCancelQualityScan = async () => {
     try {
       await cancelQualityScan(project.id);
+      if (cancelPoll.current) cancelPoll.current();
       setQualityMetrics({ status: "cancelled", error: "Scan was stopped by the user." });
     } catch (err) {
       alert("Error stopping quality scan: " + err.message);
@@ -274,10 +278,20 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
                   <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
                     ✨ Maintainability: {qualityMetrics.sqale_rating ? ["A", "B", "C", "D", "E"][Math.floor(parseFloat(qualityMetrics.sqale_rating)) - 1] || qualityMetrics.sqale_rating : "N/A"}
                   </span>
-                  <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
+                  <span
+                    className="sec-badge"
+                    style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)", cursor: "pointer" }}
+                    title="View individual code smells"
+                    onClick={() => setQualityDetailView(qualityDetailView === "smells" ? null : "smells")}
+                  >
                     🐛 Code Smells: {qualityMetrics.code_smells || 0}
                   </span>
-                  <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
+                  <span
+                    className="sec-badge"
+                    style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)", cursor: "pointer" }}
+                    title="View duplicated code blocks"
+                    onClick={() => setQualityDetailView(qualityDetailView === "duplications" ? null : "duplications")}
+                  >
                     👯 Duplication: {qualityMetrics.duplicated_lines_density || 0}%
                   </span>
                   <span className="sec-badge" style={{ background: "var(--bg-void)", border: "1px solid var(--border-color)", color: "var(--text-primary)" }}>
@@ -285,13 +299,34 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
                   </span>
                 </>
               ) : qualityMetrics?.status === "running" ? (
-                <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
-                  <span className="thinking"><span className="dot" /><span className="dot" /><span className="dot" /></span>
-                  {qualityMetrics.stage || "Analyzing..."}
+                <div style={{ width: "100%" }}>
+                  <div style={{ color: "var(--text-secondary)", fontSize: "13px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span className="thinking"><span className="dot" /><span className="dot" /><span className="dot" /></span>
+                    {qualityMetrics.stage || "Analyzing..."}
+                    {typeof qualityMetrics.percent === "number" && (
+                      <span style={{ fontWeight: "600", color: "var(--text-primary)" }}>{qualityMetrics.percent}%</span>
+                    )}
+                  </div>
+                  {typeof qualityMetrics.percent === "number" && (
+                    <div style={{ marginTop: "6px", height: "4px", width: "100%", background: "var(--bg-void)", borderRadius: "2px", overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${qualityMetrics.percent}%`,
+                          background: "var(--accent)",
+                          transition: "width 0.5s ease",
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : qualityMetrics?.status === "error" ? (
                 <div style={{ color: "var(--status-error)", fontSize: "13px" }}>
                   ⚠ {qualityMetrics.error}
+                </div>
+              ) : qualityMetrics?.status === "cancelled" ? (
+                <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+                  Scan stopped.
                 </div>
               ) : (
                 <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
@@ -299,6 +334,126 @@ export default function ChatPanel({ project, onAsk, onViewReport, onDelete, onRe
                 </div>
               )}
             </div>
+
+            {qualityMetrics?.status === "complete" && qualityDetailView === "smells" && (
+              <div style={{ marginTop: "12px", background: "var(--bg-void)", border: "1px solid var(--border-color)", borderRadius: "6px", padding: "8px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", textTransform: "uppercase" }}>Code Smells</span>
+                  <span
+                    onClick={() => setQualityDetailView(null)}
+                    title="Close"
+                    style={{ cursor: "pointer", color: "var(--text-secondary)", fontSize: "14px", lineHeight: 1, padding: "2px 4px" }}
+                  >
+                    ✕
+                  </span>
+                </div>
+                <div style={{ maxHeight: "220px", overflowY: "auto" }}>
+                  {(qualityMetrics.code_smells_list || []).length === 0 ? (
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>No code smells found.</div>
+                  ) : (
+                    qualityMetrics.code_smells_list.map((s, i) => {
+                      const key = `smell-${i}`;
+                      const isOpen = !!expandedSnippets[key];
+                      return (
+                        <div key={i} style={{ fontSize: "12px", padding: "6px 0", borderBottom: "1px solid var(--border-hair)" }}>
+                          <div style={{ color: "var(--text-primary)" }}>{s.message}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "2px" }}>
+                            <span style={{ color: "var(--text-secondary)" }}>
+                              {s.file}{s.line ? `:${s.line}` : ""} · {s.severity}
+                            </span>
+                            {s.snippet && (
+                              <span
+                                onClick={() => toggleSnippet(key)}
+                                style={{ cursor: "pointer", color: "var(--accent)", fontSize: "11px", whiteSpace: "nowrap" }}
+                              >
+                                {isOpen ? "Hide code" : "View code"}
+                              </span>
+                            )}
+                          </div>
+                          {isOpen && s.snippet && (
+                            <pre style={{
+                              marginTop: "4px",
+                              padding: "6px 8px",
+                              background: "var(--bg-panel)",
+                              border: "1px solid var(--border-hair)",
+                              borderRadius: "4px",
+                              fontSize: "11px",
+                              overflowX: "auto",
+                              color: "var(--text-primary)",
+                              whiteSpace: "pre",
+                            }}>
+                              {s.snippet}
+                            </pre>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {qualityMetrics?.status === "complete" && qualityDetailView === "duplications" && (
+              <div style={{ marginTop: "12px", background: "var(--bg-void)", border: "1px solid var(--border-color)", borderRadius: "6px", padding: "8px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)", textTransform: "uppercase" }}>Duplications</span>
+                  <span
+                    onClick={() => setQualityDetailView(null)}
+                    title="Close"
+                    style={{ cursor: "pointer", color: "var(--text-secondary)", fontSize: "14px", lineHeight: 1, padding: "2px 4px" }}
+                  >
+                    ✕
+                  </span>
+                </div>
+                <div style={{ maxHeight: "220px", overflowY: "auto" }}>
+                  {(qualityMetrics.duplications || []).length === 0 ? (
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>No duplicated code blocks found.</div>
+                  ) : (
+                    qualityMetrics.duplications.map((d, i) => (
+                      <div key={i} style={{ fontSize: "12px", padding: "6px 0", borderBottom: "1px solid var(--border-hair)" }}>
+                        <div style={{ color: "var(--text-primary)" }}>{d.source_file}</div>
+                        {d.blocks.map((b, j) => {
+                          const key = `dup-${i}-${j}`;
+                          const isOpen = !!expandedSnippets[key];
+                          return (
+                            <div key={j} style={{ marginTop: "4px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span style={{ color: "var(--text-secondary)" }}>
+                                  ↳ {b.file} from line {b.from_line} ({b.size} lines)
+                                </span>
+                                {b.snippet && (
+                                  <span
+                                    onClick={() => toggleSnippet(key)}
+                                    style={{ cursor: "pointer", color: "var(--accent)", fontSize: "11px", whiteSpace: "nowrap" }}
+                                  >
+                                    {isOpen ? "Hide code" : "View code"}
+                                  </span>
+                                )}
+                              </div>
+                              {isOpen && b.snippet && (
+                                <pre style={{
+                                  marginTop: "4px",
+                                  padding: "6px 8px",
+                                  background: "var(--bg-panel)",
+                                  border: "1px solid var(--border-hair)",
+                                  borderRadius: "4px",
+                                  fontSize: "11px",
+                                  overflowX: "auto",
+                                  color: "var(--text-primary)",
+                                  whiteSpace: "pre",
+                                }}>
+                                  {b.snippet}
+                                </pre>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="chat-header-stats">

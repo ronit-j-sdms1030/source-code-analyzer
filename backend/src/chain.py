@@ -1,8 +1,82 @@
 import os
+import re
 
 from . import config
 from .embeddings import embed_query
 from .vectorstore import query_chunks
+
+# ── Full File Content Requests ────────────────────────────────────────────────
+# When the user literally asks for the entire contents of a file, RAG chunk
+# retrieval (~800-char chunks, see ingestion._split_files) would only surface
+# fragments. Detect that intent and serve the raw file straight off disk instead.
+_FULL_FILE_PATTERNS = re.compile(
+    r'\b(entire|full|complete|whole)\b[^.?!\n]{0,25}\b(contents?|code|file)\b'
+    r'|\b(contents?|code|file)\b[^.?!\n]{0,25}\b(entire|full|complete|whole)\b',
+    re.I,
+)
+
+_EXT_TO_LANG = {
+    ".py": "python", ".js": "javascript", ".jsx": "javascript",
+    ".ts": "typescript", ".tsx": "typescript", ".java": "java",
+    ".go": "go", ".rb": "ruby", ".rs": "rust", ".php": "php",
+    ".c": "c", ".h": "c", ".cpp": "cpp", ".cxx": "cpp", ".cc": "cpp",
+    ".cs": "csharp", ".css": "css", ".html": "xml", ".htm": "xml",
+    ".xml": "xml", ".sh": "bash", ".bash": "bash", ".zsh": "bash",
+    ".yaml": "yaml", ".yml": "yaml", ".json": "json",
+    ".env": "bash", ".toml": "bash", ".tf": "python", ".kt": "java",
+    ".swift": "swift",
+}
+
+
+def _infer_lang_for_fence(path: str) -> str:
+    _, ext = os.path.splitext(path.lower())
+    return _EXT_TO_LANG.get(ext, "")
+
+
+def _detect_full_file_request(question: str, file_hashes: dict):
+    """If `question` is asking for a whole file, return its matched relative path (else None)."""
+    if not file_hashes or not _FULL_FILE_PATTERNS.search(question):
+        return None
+
+    q_lower = question.lower()
+    candidates = []
+    for rel_path in file_hashes.keys():
+        basename = os.path.basename(rel_path)
+        if rel_path.lower() in q_lower:
+            candidates.append((len(rel_path), rel_path))
+        elif basename and basename.lower() in q_lower:
+            candidates.append((len(basename), rel_path))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)  # prefer the longest/most-specific match
+    return candidates[0][1]
+
+
+def _read_full_file(project_id: str, rel_path: str):
+    """Reads the full raw contents of a project file off disk. Returns (content, error)."""
+    repo_dir = os.path.join(config.REPOS_DIR, project_id)
+    abs_path = os.path.normpath(os.path.join(repo_dir, rel_path))
+
+    if not abs_path.startswith(os.path.realpath(repo_dir)):
+        return None, "invalid file path"
+    if not os.path.exists(abs_path):
+        return None, "file not found on disk (it may have been deleted since the scan)"
+
+    try:
+        with open(abs_path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        return None, str(e)
+
+    if b"\x00" in raw[:8192]:
+        return None, "this appears to be a binary file and can't be displayed as text"
+
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1", errors="replace")
+
+    return content, None
 
 # Well-known vendor-published documentation/example keys that are deliberately
 # fake and safe. Published by the vendor in their own official documentation.
@@ -588,9 +662,29 @@ def answer_question(project_id: str, question: str, session_id: str) -> dict:
     import uuid
     
     history = get_session_history(session_id)
-    
+
+    # ── Full File Content Request ──
+    # Bypass RAG entirely for literal "give me the whole file" requests — chunk
+    # retrieval would only return fragments, not the exact full file.
+    if _FULL_FILE_PATTERNS.search(question):
+        meta_for_file_lookup = get_project_meta(project_id) or {}
+        matched_path = _detect_full_file_request(question, meta_for_file_lookup.get("file_hashes", {}))
+        if matched_path:
+            full_content, read_error = _read_full_file(project_id, matched_path)
+            append_to_session(session_id, {"role": "user", "text": question})
+            if read_error:
+                ans = f"I found `{matched_path}` in the repo, but couldn't read it: {read_error}"
+            else:
+                lang = _infer_lang_for_fence(matched_path)
+                ans = f"Here is the entire contents of `{matched_path}`:\n\n```{lang}\n{full_content.rstrip(chr(10))}\n```"
+            append_to_session(session_id, {"role": "assistant", "text": ans})
+            return {
+                "answer": ans,
+                "sources": [{"file_path": matched_path}],
+                "debug_context": {"intent": "full_file_request", "file_path": matched_path},
+            }
+
     # ── Ordinal and Plural Resolution Logic ──
-    import re
     ordinal_idx = None
     resolved_findings = []
     

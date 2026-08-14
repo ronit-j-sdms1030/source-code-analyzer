@@ -91,6 +91,10 @@ export function askQuestion(projectId, question, sessionId) {
   });
 }
 
+export function getChatHistory(projectId, sessionId) {
+  return request(`/projects/${projectId}/chat_history?sessionId=${encodeURIComponent(sessionId)}`);
+}
+
 /**
  * Polls /ingest/:id/status until status is "ready" or "error".
  * Calls onUpdate(status) after every poll so the UI (pipeline rail) can
@@ -160,7 +164,7 @@ export function getQualityScanStatus(id) {
 }
 
 /**
- * Polls /projects/:id/quality-scan/status until status is "complete" or "error".
+ * Polls /projects/:id/quality-scan/status until status is "complete", "error", or "cancelled".
  */
 export function pollQualityScanStatus(id, onUpdate, { intervalMs = 2000 } = {}) {
   let cancelled = false;
@@ -170,7 +174,7 @@ export function pollQualityScanStatus(id, onUpdate, { intervalMs = 2000 } = {}) 
     try {
       const status = await getQualityScanStatus(id);
       onUpdate(status);
-      if (status.status === "complete" || status.status === "error") return;
+      if (status.status === "complete" || status.status === "error" || status.status === "cancelled") return;
     } catch (err) {
       // 404 means not started yet
       if (String(err).includes("404")) {

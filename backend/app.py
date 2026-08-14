@@ -134,11 +134,22 @@ def chat():
         return jsonify({"error": "projectId and question are required"}), 400
         
     result = answer_question(project_id, question, session_id)
-    
+
     # Return the session_id to the client so they can include it in future requests
     result["sessionId"] = session_id
-    
+
     return jsonify(result)
+
+
+@app.get("/projects/<project_id>/chat_history")
+@auth_required
+def get_chat_history(project_id):
+    """Restores a chat session's message history (e.g. after a page reload)."""
+    from src.memory import get_session_history
+    session_id = request.args.get("sessionId", "").strip()
+    if not session_id:
+        return jsonify({"error": "sessionId is required"}), 400
+    return jsonify({"messages": get_session_history(session_id)})
 
 
 @app.get("/projects/<project_id>/vulnerabilities")
